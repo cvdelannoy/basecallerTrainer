@@ -1,5 +1,5 @@
 import numpy as np
-import os
+import re
 from cached_property import cached_property
 
 # A class for MinION training reads, containing read name, raw signal, event
@@ -10,7 +10,7 @@ from cached_property import cached_property
 
 class TrainingRead:
 
-    def __init__(self, hdf, readnb, refsam):
+    def __init__(self, hdf, readnb, nanoraw_only, with_pos_only):
         """Initialize a new training read.
 
         Keyword arguments:
@@ -20,7 +20,9 @@ class TrainingRead:
         """
         self.hdf = hdf
         self.readnb = readnb
-        self.refsam = refsam
+        # self.refsam = refsam
+        self.nanoraw_only = nanoraw_only
+        self.with_pos_only = with_pos_only
         self._rawsignal_out = None
         self._event_pattern_out = None
         self._event_pattern_nanoraw_out = None
@@ -56,11 +58,12 @@ class TrainingRead:
     @cached_property
     def event_pattern_nanoraw(self):
         """
-        Retrieve 5-mers as assigned by nanoraw, matching exactly to reference
+        Retrieve single nucleotides as assigned by nanoraw, convert to 5-mers
+        and assign to corresponding raw data points.
         """
         try:
             event_data = (self.hdf['Analyses/RawGenomeCorrected_000/BaseCalled_template/Events']
-                              [("length", "base")])
+                                  [("length", "base")])
         except KeyError:
             return None
         event_data = np.array(event_data.tolist())
@@ -91,37 +94,77 @@ class TrainingRead:
         return (self.hdf['Analyses/Basecall_1D_000/BaseCalled_template/Fastq']
                         [()].astype(str).split[2])
 
-    @property
-    # TODO: finish
-    def ref_sequence(self):
-        """
-        Retrieve reference sequence from sam-file
-        """
-        fastq_name = (self.hdf['Analyses/Basecall_1D_000/BaseCalled_template/Fastq']
-                              [()].astype(str).split()[0])
-        fastq_name = fastq_name[1:]  # remove at-sign of fastq
-        sr = os.popen("grep -m 1 "
-                      + fastq_name
-                      + " " + self.refsam).read().split()
-        # cigar = sr[6]
-        seq = sr[10]
-        return seq
+    # @property
+    # # TODO: finish
+    # def ref_sequence(self):
+    #     """
+    #     Retrieve reference sequence from sam-file
+    #     """
+    #     fastq_name = (self.hdf['Analyses/Basecall_1D_000/BaseCalled_template/Fastq']
+    #                           [()].astype(str).split()[0])
+    #     fastq_name = fastq_name[1:]  # remove at-sign of fastq
+    #     sr = os.popen("grep -m 1 "
+    #                   + fastq_name
+    #                   + " " + self.refsam).read().split()
+    #     # cigar = sr[6]
+    #     seq = sr[10]
+    #     return seq
 
     @cached_property
     def homopolymer_onehot(self):
         """
-        Construct onehot vector, containing True when 5-mer is homopolymeric
+        If nanoraw was able to map, construct onehot vector containing True
+        where 5-mer is homopolymeric
         """
-        if self.event_pattern_nanoraw is None:
-            event_pattern = self.event_pattern_nanoraw
-        else:
-            event_pattern = self.event_pattern
-
+        event_pattern = self._return_event_pattern()
         hpi = np.array([], dtype=int)
         for s in ['AAAAA', 'TTTTT', 'CCCCC', 'GGGGG']:
             hpi_cur = np.where(event_pattern == s)
             hpi = np.concatenate((hpi, hpi_cur[0]))
+        if self.with_pos_only and hpi.size == 0:  # If no hits were found, return none
+            return None
         hpi.sort()
         self._homopolymer_onehot_out = np.zeros(self.rawsignal.size, dtype=bool)
         self._homopolymer_onehot_out[hpi] = True
         return self._homopolymer_onehot_out
+
+    def regex_onehot(self, pattern, min_length=5):
+        """
+        Construct a onehot vector denoting position at which the supplied regex
+        pattern is found.
+        Does not work on patterns longer or shorter than 5 nt's!
+        :param pattern: 
+        :return: 
+        """
+        if pattern[-2:] is not '\Z':
+            raise ValueError('End regex pattern with a \Z to ensure that at mininimum,'
+                             'an entire 5-mer is covered upon finding a hit.')
+        if min_length < 5:
+            raise ValueError('minimum match length should be 5 or more.')
+        event_pattern = self._return_event_pattern
+        r = re.compile(pattern)
+        re_vector = np.vectorize(lambda x:bool(r.match(x)))
+        match_indices = re_vector(event_pattern) # Locate initial matches
+        all_match_indices = np.array([], dtype=int)
+        for i in match_indices:
+            if i not in all_match_indices:
+                cur_match = event_pattern[i].tolist()
+                cur_indices = np.array([], dtype=int)
+                j = i
+                while bool(r.match(cur_match)): # while match remains found, continue adding single bases
+                    cur_indices = np.append(cur_indices, j)
+                    j += 1
+                    cur_match = cur_match + event_pattern[j].tolist()[-1]
+                if cur_indices.size > min_length:
+                    all_match_indices = np.append(all_match_indices, cur_indices)
+        onehot_out = np.zeros(self.rawsignal.size, dtype=bool)
+        onehot_out[all_match_indices] = True
+        return onehot_out
+
+    def _return_event_pattern(self):
+        if self.event_pattern_nanoraw is None:
+            if self.nanoraw_only:
+                return None
+            return self.event_pattern
+        else:
+            return self.event_pattern_nanoraw
