@@ -32,7 +32,7 @@ tb_path = '/home/lanno001/PycharmProjects/basecallerTrainer/tfLogs/'
 graph_path = tb_path + 'additional_graphs/'
 
 # Define path of training dataset
-tr_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simts_multiclass_HpProb01/'
+tr_path = '/mnt/scratch/lanno001/readFiles/ecoliLoman/ecoliLoman_simts_multiclass/'
 tr_list = os.listdir(tr_path)
 
 # Define path of test dataset
@@ -205,36 +205,9 @@ with tf.Session() as sess:
             print("Training step %d loss %f accuracy %f TPR %f TNR %f" % (step, _mean_loss, _accuracy, _TPR, _TNR))
             if step % 100 == 0:
                 # Plot timeseries overlaid with classification
-                ts_plot = figure(title='Classified time series')
-                ts_plot.grid.grid_line_alpha = 0.3
-                ts_plot.xaxis.axis_label = 'nb events'
-                ts_plot.yaxis.axis_label = 'current signal'
-                y_range = raw.max() - raw.min()
-                colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00']
-                col_mapper = CategoricalColorMapper(factors=list(range(num_classes+1)), palette=colors)
-                source = ColumnDataSource(dict(
-                    raw=raw[(label_shift - 1):][:y_hat.size],
-                    event=list(range(batch_size * nb_steps)),
-                    cat=y_hat[0, :],
-                    cat_height=np.repeat(np.mean(raw[(label_shift - 1):][:y_hat.size]), batch_size * nb_steps),
-                    base_labels= base_labels[(label_shift - 1):][:y_hat.size]
-                ))
-                ts_plot.rect(x='event', y='cat_height', width=1, height=y_range, source=source,
-                             fill_color={
-                                 'field': 'cat',
-                                 'transform': col_mapper
-                             },
-                             line_color=None)
-                base_labels_LabelSet = LabelSet(x='event', y='cat_height',
-                                                y_offset=-y_range, angle=-0.5*pi,
-                                                text='base_labels', text_baseline='middle',
-                                                source=source)
-                ts_plot.add_layout(base_labels_LabelSet)
-                ts_plot.scatter(x='event', y='raw', source=source)
-                ts_plot.plot_width = 10000
-                ts_plot.plot_height = 500
-                ts_plot.x_range = Range1d(0,500)
-                output_file('%stimeseries_ep%d_step%d_TPR%f.html' % (graph_path, epoch_index, step, _TPR))
+                ts_plot = helper_functions.plot_timeseries(raw, num_classes, label_shift, y_hat, batch_size, nb_steps,
+                                                           base_labels)
+                output_file('%stimeseries_ordinal_ep%d_step%d_TPR%f.html' % (graph_path, epoch_index, step, _TPR))
                 save(ts_plot)
         step += 1; read_index += 1
         if read_index >= len(tr_list):
