@@ -38,6 +38,7 @@ class ordinal_brnn(object):
 
         self.session = None
 
+
     @property
     def y_placeholder(self):
         with tf.name_scope('input'):
@@ -50,7 +51,7 @@ class ordinal_brnn(object):
             x_placeholder = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
         return tf.unstack(x_placeholder, self.nb_steps, 1)
 
-    @cached_property
+    @property
     def base_cell(self):
         if self.cell_type == 'GRU':
             return tf.contrib.rnn.GRUCell(num_units=self.layer_size)
@@ -84,6 +85,13 @@ class ordinal_brnn(object):
         y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
         return y_hat
 
+    @cached_property
+    def optimizer(self):
+        losses = [tf.nn.sigmoid_cross_entropy_with_logits(
+            logits=pr, labels=tf.cast(yi, dtype=tf.float32)) for pr, yi in zip(self.brnn, self.y_placeholder)]
+        mean_loss = tf.reduce_mean(tf.stack(losses))
+        return tf.train.AdamOptimizer(self.learning_rate).minimize(mean_loss)
+
     def initialize_model(self, params):
         model = self.brnn
         self.session = tf.Session()
@@ -94,12 +102,12 @@ class ordinal_brnn(object):
             print("Loading model parameters from %s" % params)
             tf.train.Saver(tf.global_variables()).restore(self.session, params)
 
-    def train_model(self):
-        losses = [tf.nn.sigmoid_cross_entropy_with_logits(
-            logits=pr, labels=tf.cast(yi, dtype=tf.float32)) for pr, yi in zip(self.brnn, self.y_placeholder)]
-        mean_loss = tf.reduce_mean(tf.stack(losses))
-        return tf.train.AdamOptimizer(self.learning_rate).minimize(mean_loss)
 
+    def train_model(self, raw, labels):
+        self.session.run(self.optimizer, feed_dict={
+            x_placeholder: raw,
+            y_placeholder: labels
+        })
 
 
     def evaluate_performance(self, raw, labels, metrics):
@@ -111,7 +119,7 @@ class ordinal_brnn(object):
         :return: 
         """
         return self.session.run([metrics],feed_dict = {x_placeholder: raw,
-                                                y_placeholder: labels})
+                                                       y_placeholder: labels})
 
     def predict(self, raw):
         return self.session.run([y_hat],feed_dict = {x_placeholder: raw})
