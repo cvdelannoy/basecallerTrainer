@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import cas.RWACell as rwa
+# import cas.RWACell as rwa
 
 from cached_property import cached_property
 
@@ -35,21 +35,18 @@ class ordinal_brnn(object):
         self.label_shift = (input_size - 1)//2
         self.w = tf.Variable(tf.random_normal([2*layer_size, num_classes]))
         self.b = tf.Variable(np.zeros([num_classes], dtype=np.float32))
+        self.x_placeholder = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
+        self.y_placeholder = tf.placeholder(tf.int64, [self.batch_size, self.nb_steps, self.num_classes])
 
         self.session = None
 
+    @cached_property
+    def y(self):
+        return tf.unstack(self.y_placeholder, self.nb_steps, 1)
 
-    @property
-    def y_placeholder(self):
-        with tf.name_scope('input'):
-            y_placeholder = tf.placeholder(tf.int64, [self.batch_size, self.nb_steps])
-        return tf.unstack(y_placeholder, self.nb_steps, 1)
-
-    @property
-    def x_placeholder(self):
-        with tf.name_scope('input'):
-            x_placeholder = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
-        return tf.unstack(x_placeholder, self.nb_steps, 1)
+    @cached_property
+    def x(self):
+        return tf.unstack(self.x_placeholder, self.nb_steps, 1)
 
     @property
     def base_cell(self):
@@ -81,14 +78,14 @@ class ordinal_brnn(object):
             bwd_cell_list.append(bwd_cell)
         bwd_multicell = tf.contrib.rnn.MultiRNNCell(bwd_cell_list)
         brnn_out, _, _ = tf.contrib.rnn.static_bidirectional_rnn(cell_fw=fwd_multicell, cell_bw=bwd_multicell,
-                                                            inputs=self.x_placeholder, dtype=tf.float32)
+                                                            inputs=self.x, dtype=tf.float32)
         y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
         return y_hat
 
     @cached_property
     def optimizer(self):
         losses = [tf.nn.sigmoid_cross_entropy_with_logits(
-            logits=pr, labels=tf.cast(yi, dtype=tf.float32)) for pr, yi in zip(self.brnn, self.y_placeholder)]
+            logits=pr, labels=tf.cast(yi, dtype=tf.float32)) for pr, yi in zip(self.brnn, self.y)]
         mean_loss = tf.reduce_mean(tf.stack(losses))
         return tf.train.AdamOptimizer(self.learning_rate).minimize(mean_loss)
 
@@ -104,9 +101,9 @@ class ordinal_brnn(object):
 
 
     def train_model(self, raw, labels):
-        self.session.run(self.optimizer, feed_dict={
-            x_placeholder: raw,
-            y_placeholder: labels
+        self.session.run(self.optimizer(), feed_dict={
+            self.x_placeholder: raw,
+            self.y_placeholder: labels
         })
 
 
@@ -118,9 +115,9 @@ class ordinal_brnn(object):
         :param metrics: list of model performance metrics
         :return: 
         """
-        return self.session.run([metrics],feed_dict = {x_placeholder: raw,
-                                                       y_placeholder: labels})
+        return self.session.run([metrics],feed_dict = {self.x_placeholder: raw,
+                                                       self.y_placeholder: labels})
 
     def predict(self, raw):
-        return self.session.run([y_hat],feed_dict = {x_placeholder: raw})
+        return self.session.run([y_hat],feed_dict = {self.x_placeholder: raw})
 
