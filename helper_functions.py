@@ -10,7 +10,14 @@ from bokeh.io import show
 from math import pi
 
 
-def set_logfolder(sess, parent_dir, batch_size, layer_size, learning_rate, pos_weight, epoch_index, cell_type):
+def set_logfolder(sess,
+                  parent_dir,
+                  batch_size,
+                  layer_size,
+                  learning_rate,
+                  pos_weight,
+                  epoch_index,
+                  cell_type):
     """
     Create a folder to store tensorflow metrics for tensorboard and set it up for a specific session.
     :param sess: 

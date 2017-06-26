@@ -38,15 +38,21 @@ class ordinal_brnn(object):
         self.x_placeholder = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
         self.y_placeholder = tf.placeholder(tf.int64, [self.batch_size, self.nb_steps, self.num_classes])
 
+        self.y = tf.unstack(self.y_placeholder, self.nb_steps, 1)
+        self.x = tf.unstack(self.x_placeholder, self.nb_steps, 1)
+        self.brnn = self.set_brnn()
         self.session = None
 
-    @cached_property
-    def y(self):
-        return tf.unstack(self.y_placeholder, self.nb_steps, 1)
+        # predefined for this class
+        self.optimizer = "adam"
 
-    @cached_property
-    def x(self):
-        return tf.unstack(self.x_placeholder, self.nb_steps, 1)
+    # @cached_property
+    # def y(self):
+    #     return tf.unstack(self.y_placeholder, self.nb_steps, 1)
+    #
+    # @cached_property
+    # def x(self):
+    #     return tf.unstack(self.x_placeholder, self.nb_steps, 1)
 
     @property
     def base_cell(self):
@@ -54,23 +60,24 @@ class ordinal_brnn(object):
             return tf.contrib.rnn.GRUCell(num_units=self.layer_size)
         if self.cell_type == 'LSTM':
             return tf.contrib.rnn.BasicLSTMCell(num_units=self.layer_size, forget_bias=1.0)
-        if self.cell_type == 'RWA':
-            return rwa.RWACell(num_units=self.layer_size, decay_rate=0.0)
+        # if self.cell_type == 'RWA':
+        #     return rwa.RWACell(num_units=self.layer_size, decay_rate=0.0)
         return ValueError('Invalid cell_type given.')
 
-    @cached_property
-    def brnn(self):
+    def set_brnn(self):
         """
         Method for the definition of the blstm that is to be trained/used
         :return: 
         """
-        fwd_cell_list = []; bwd_cell_list=[]
+        fwd_cell_list = []
         for fl in range(self.num_layers):
             with tf.variable_scope('forward%d' % fl, reuse=True):
                 fwd_cell = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(self.base_cell,
                                                                        output_keep_prob=self.dropout_keep_prob)
             fwd_cell_list.append(fwd_cell)
         fwd_multicell = tf.contrib.rnn.MultiRNNCell(fwd_cell_list)
+
+        bwd_cell_list = []
         for bl in range(self.num_layers):
             with tf.variable_scope('backward%d' % bl, reuse=True):
                 bwd_cell = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(self.base_cell,
@@ -78,16 +85,20 @@ class ordinal_brnn(object):
             bwd_cell_list.append(bwd_cell)
         bwd_multicell = tf.contrib.rnn.MultiRNNCell(bwd_cell_list)
         brnn_out, _, _ = tf.contrib.rnn.static_bidirectional_rnn(cell_fw=fwd_multicell, cell_bw=bwd_multicell,
-                                                            inputs=self.x, dtype=tf.float32)
+                                                                 inputs=self.x, dtype=tf.float32)
         y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
         return y_hat
 
-    @cached_property
+    @property
     def optimizer(self):
+        return self._optimizer
+
+    @optimizer.setter
+    def optimizer(self, name_optimizer):
         losses = [tf.nn.sigmoid_cross_entropy_with_logits(
             logits=pr, labels=tf.cast(yi, dtype=tf.float32)) for pr, yi in zip(self.brnn, self.y)]
         mean_loss = tf.reduce_mean(tf.stack(losses))
-        return tf.train.AdamOptimizer(self.learning_rate).minimize(mean_loss)
+        self._optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(mean_loss)
 
     def initialize_model(self, params):
         model = self.brnn
@@ -99,13 +110,11 @@ class ordinal_brnn(object):
             print("Loading model parameters from %s" % params)
             tf.train.Saver(tf.global_variables()).restore(self.session, params)
 
-
     def train_model(self, raw, labels):
-        self.session.run(self.optimizer(), feed_dict={
+        self.session.run(self.optimizer, feed_dict={
             self.x_placeholder: raw,
             self.y_placeholder: labels
         })
-
 
     def evaluate_performance(self, raw, labels, metrics):
         """
@@ -118,6 +127,5 @@ class ordinal_brnn(object):
         return self.session.run([metrics],feed_dict = {self.x_placeholder: raw,
                                                        self.y_placeholder: labels})
 
-    def predict(self, raw):
-        return self.session.run([y_hat],feed_dict = {self.x_placeholder: raw})
-
+    # def predict(self, raw):
+    #     return self.session.run([self.],feed_dict = {self.x_placeholder: raw})
