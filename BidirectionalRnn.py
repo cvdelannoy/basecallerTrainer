@@ -42,10 +42,11 @@ class BidirectionalRnn(object):
         self.w = tf.Variable(tf.random_normal([2 * layer_size, num_classes]))
         self.b = tf.Variable(np.zeros([num_classes], dtype=np.float32))
         self.x = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
-        self.y = tf.placeholder(tf.int64, [self.batch_size, self.nb_steps, self.num_classes])
+        self.y = tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
         # self.y = tf.unstack(self.y_placeholder, self.nb_steps, 1)  # to sub
         # self.x = tf.unstack(self.x_placeholder, self.nb_steps, 1)  # to sub
         self.y_hat = self.construct_brnn()
+        self.tb_summary = self.evaluate_model()
 
         self.session = None
         self.optimizer = name_optimizer
@@ -93,10 +94,10 @@ class BidirectionalRnn(object):
             bwd_cell_list.append(bwd_cell)
         bwd_multicell = tf.contrib.rnn.MultiRNNCell(bwd_cell_list)
         brnn_out, _, _ = tf.contrib.rnn.static_bidirectional_rnn(cell_fw=fwd_multicell, cell_bw=bwd_multicell,
-                                                                 inputs=tf.unstack(self.x, self.nb_steps,1),
+                                                                 inputs=tf.unstack(self.x, self.nb_steps, 1),
                                                                  dtype=tf.float32)
         y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
-        return tf.stack(y_hat, axis=-1)
+        return tf.stack(y_hat, axis=1)
 
     @optimizer.setter
     def optimizer(self, name_optimizer):
@@ -140,21 +141,12 @@ class BidirectionalRnn(object):
             self.y: labels_reshape
         })
 
-    def evaluate_performance(self, raw, labels, metrics):
-        """
-        :param raw: numpy object containing raw data
-        :param labels:  numpy object containing labels
-        :param metrics: list of model performance metrics
-        :return: 
-        """
-        return self.session.run([metrics], feed_dict={self.x: raw,
-                                                      self.y: labels})
-
-        # def predict(self, raw):
-        #     return self.session.run([self.],feed_dict = {self.x_placeholder: raw})
-
-    # @abc.abstractmethod
-    # @property
+    def predict(self, raw):
+        raw_reshape = self.reshape_raw(raw)
+        y_hat = self.session.run(self.y_hat, feed_dict={
+            self.x: raw_reshape
+        })
+        return y_hat
 
     @abc.abstractmethod
     def calculate_cost(self):

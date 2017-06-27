@@ -5,54 +5,46 @@ import shutil
 import time
 
 from bokeh.models import ColumnDataSource, CategoricalColorMapper, LabelSet, Range1d
-from bokeh.plotting import figure, save, output_file
-from bokeh.io import show
+from bokeh.plotting import figure
+
 from math import pi
 
 
-def set_logfolder(sess,
-                  parent_dir,
-                  batch_size,
-                  layer_size,
-                  learning_rate,
-                  pos_weight,
-                  epoch_index,
-                  cell_type):
+def set_logfolder(brnn_object, parent_dir, epoch_index):
     """
     Create a folder to store tensorflow metrics for tensorboard and set it up for a specific session.
-    :param sess: 
-    :param parent_dir: 
-    :param batch_size: 
-    :param input_size: 
-    :param learning_rate: 
-    :param pos_weight: 
-    :param epoch_index: 
-    :return: 
+    Returns a filewriter object, which can be used to write info to tensorboard.
     """
     timedate = time.strftime('%y%m%d_%H%M%S')
-    cur_tb_path = parent_dir + '%s_%s_bs%s_is%s_lr%s_pw%s_ep%s/' % (timedate, cell_type, batch_size, layer_size,
-                                                                 learning_rate, pos_weight,
-                                                                 epoch_index)
+    cur_tb_path = parent_dir + '%s_%s_batchSize%s_layerSize%s_inputSize%s_learningRate%s_ep%s/' % (
+                                                               timedate,
+                                                               brnn_object.cell_type,
+                                                               brnn_object.batch_size,
+                                                               brnn_object.layer_size,
+                                                               brnn_object.input_size,
+                                                               brnn_object.learning_rate,
+                                                               epoch_index)
     if os.path.isdir(cur_tb_path):
         shutil.rmtree(cur_tb_path)
     os.mkdir(cur_tb_path)
-    return tf.summary.FileWriter(cur_tb_path, sess.graph)
+    return tf.summary.FileWriter(cur_tb_path, brnn_object.session.graph)
 
 
-def plot_timeseries(raw, num_classes, label_shift, y_hat, batch_size, nb_steps, base_labels):
+def plot_timeseries(raw, base_labels, y_hat, brnn_object):
     ts_plot = figure(title='Classified time series')
     ts_plot.grid.grid_line_alpha = 0.3
     ts_plot.xaxis.axis_label = 'nb events'
     ts_plot.yaxis.axis_label = 'current signal'
     y_range = raw.max() - raw.min()
     colors = ['#ffffff', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000']
-    col_mapper = CategoricalColorMapper(factors=list(range(num_classes)), palette=colors)
+    col_mapper = CategoricalColorMapper(factors=list(range(brnn_object.num_classes)), palette=colors)
     source = ColumnDataSource(dict(
-        raw=raw[(label_shift - 1):][:y_hat.size],
-        event=list(range(batch_size * nb_steps)),
+        raw=raw[(brnn_object.label_shift - 1):][:y_hat.size],
+        event=list(range(brnn_object.batch_size * brnn_object.nb_steps)),
         cat=y_hat[0, :],
-        cat_height=np.repeat(np.mean(raw[(label_shift - 1):][:y_hat.size]), batch_size * nb_steps),
-        base_labels=base_labels[(label_shift - 1):][:y_hat.size]
+        cat_height=np.repeat(np.mean(raw[(brnn_object.label_shift - 1):][:y_hat.size]),
+                             brnn_object.batch_size * brnn_object.nb_steps),
+        base_labels=base_labels[(brnn_object.label_shift - 1):][:y_hat.size]
     ))
     ts_plot.rect(x='event', y='cat_height', width=1, height=y_range, source=source,
                  fill_color={

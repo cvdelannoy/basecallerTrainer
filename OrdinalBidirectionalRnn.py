@@ -15,17 +15,17 @@ class OrdinalBidirectionalRnn(BidirectionalRnn):
     def evaluate_model(self):
         with tf.name_scope('Performance_assessment'):
             # Summary performance metrics
-            y_hat = tf.cast(tf.round(tf.reduce_sum(self.y_hat, axis=1)), dtype=tf.int32)
-
+            y_hat = tf.cast(tf.round(tf.reduce_sum(self.y_hat, axis=-1)), dtype=tf.int32)
+            y = tf.cast(tf.round(tf.reduce_sum(self.y, axis=-1)), dtype=tf.int32)
             # Overall accuracy
-            accuracy = tf.reduce_mean(tf.cast(tf.equal(self.y, y_hat), dtype=tf.float32))
+            accuracy = tf.reduce_mean(tf.cast(tf.equal(y, y_hat), dtype=tf.float32))
 
             # per class accuracy
             accuracy_list = []
             for i in range(self.num_classes):
                 cm = tf.constant(i, shape=[self.batch_size, self.nb_steps], dtype=tf.int32)
-                y_bin = tf.cast(tf.equal(self.y, cm), dtype=tf.int32)
-                y_hat_bin = tf.cast(tf.equal(self.y_hat, cm), dtype=tf.int32)
+                y_bin = tf.cast(tf.equal(y, cm), dtype=tf.int32)
+                y_hat_bin = tf.cast(tf.equal(y_hat, cm), dtype=tf.int32)
                 accuracy_class = tf.reduce_mean(tf.cast(tf.equal(y_bin, y_hat_bin), dtype=tf.float32))
                 accuracy_list.append(accuracy_class)
                 # TPR and TNR for HPs
