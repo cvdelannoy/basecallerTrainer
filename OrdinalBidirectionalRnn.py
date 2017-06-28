@@ -7,12 +7,20 @@ from BidirectionalRnn import BidirectionalRnn
 
 
 class OrdinalBidirectionalRnn(BidirectionalRnn):
+
+    @property
+    def y_hat(self):
+        y_hat = tf.cast(tf.round(tf.reduce_sum(tf.sigmoid(self.y_hat_logit), axis=-1)), dtype=tf.int32)
+        y_hat = tf.reshape(y_hat, shape=[-1])
+        padding = np.repeat(np.nan,self.label_shift)
+        return tf.concat((padding,y_hat,padding),axis=0)
+
     def calculate_cost(self):
-        losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_hat,
+        losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_hat_logit,
                                                          labels=tf.cast(self.y, dtype=tf.float32))
         return tf.reduce_mean(tf.stack(losses))
 
-    def evaluate_model(self):
+    def construct_evaluation(self):
         with tf.name_scope('Performance_assessment'):
             # Summary performance metrics
             y_hat = tf.cast(tf.round(tf.reduce_sum(self.y_hat, axis=-1)), dtype=tf.int32)

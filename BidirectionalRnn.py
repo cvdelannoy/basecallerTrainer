@@ -45,8 +45,9 @@ class BidirectionalRnn(object):
         self.y = tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
         # self.y = tf.unstack(self.y_placeholder, self.nb_steps, 1)  # to sub
         # self.x = tf.unstack(self.x_placeholder, self.nb_steps, 1)  # to sub
-        self.y_hat = self.construct_brnn()
-        self.tb_summary = self.evaluate_model()
+        self.y_hat_logit = self.construct_brnn()  # NOTE: NO SIGMOID YET!
+        self.tb_summary = self.construct_evaluation()
+        # self.tb_summary = None
 
         self.session = None
         self.optimizer = name_optimizer
@@ -141,6 +142,15 @@ class BidirectionalRnn(object):
             self.y: labels_reshape
         })
 
+    def evalulate_model(self, raw, labels):
+        raw_reshape = self.reshape_raw(raw)
+        labels_reshape = self.reshape_labels(labels)
+        tb_summary = self.session.run(self.tb_summary, feed_dict={
+            self.x: raw_reshape,
+            self.y: labels_reshape
+        })
+        return tb_summary
+
     def predict(self, raw):
         raw_reshape = self.reshape_raw(raw)
         y_hat = self.session.run(self.y_hat, feed_dict={
@@ -156,10 +166,11 @@ class BidirectionalRnn(object):
         return ValueError('cost function not implemented for class')
 
     @abc.abstractmethod
-    def evaluate_model(self):
+    def construct_evaluation(self):
         """
-        Evaluate model performance 
+        Define evaluation metrics and define how to calculate them 
         """
+        return ValueError('Evaluation metrics not defined for class')
 
     @abc.abstractmethod
     def reshape_labels(self, labels):
@@ -167,3 +178,8 @@ class BidirectionalRnn(object):
         Reshape data into form accepted by cost function
         """
         return ValueError('Label reshape function not implemented for class')
+
+    @property
+    @abc.abstractmethod
+    def y_hat(self):
+        return ValueError('conversion of NN output to prediction not implemented for class')

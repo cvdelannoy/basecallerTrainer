@@ -8,9 +8,8 @@ from BidirectionalRnn import BidirectionalRnn
 
 class ClassificationBidirectionalRnn(BidirectionalRnn):
     def calculate_cost(self):
-        y_unstacked =  tf.unstack(self.y, self.nb_steps, 1)
-        losses = [tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=pr, labels=tf.cast(yi, dtype=tf.float32)) for pr, yi in zip(self.y_hat, y_unstacked)]
+        losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.y_hat_logit,
+                                                                labels=tf.cast(self.y, dtype=tf.float32))
         return tf.reduce_mean(tf.stack(losses))
 
     def reshape_labels(self, labels):

@@ -37,14 +37,14 @@ def plot_timeseries(raw, base_labels, y_hat, brnn_object):
     ts_plot.yaxis.axis_label = 'current signal'
     y_range = raw.max() - raw.min()
     colors = ['#ffffff', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000']
+    # TODO: replace CategoricalColorMapper by LinearColorMapper
     col_mapper = CategoricalColorMapper(factors=list(range(brnn_object.num_classes)), palette=colors)
     source = ColumnDataSource(dict(
-        raw=raw[(brnn_object.label_shift - 1):][:y_hat.size],
-        event=list(range(brnn_object.batch_size * brnn_object.nb_steps)),
-        cat=y_hat[0, :],
-        cat_height=np.repeat(np.mean(raw[(brnn_object.label_shift - 1):][:y_hat.size]),
-                             brnn_object.batch_size * brnn_object.nb_steps),
-        base_labels=base_labels[(brnn_object.label_shift - 1):][:y_hat.size]
+        raw=raw,
+        event=list(range(len(y_hat))),
+        cat=y_hat,
+        cat_height=np.repeat(np.mean(raw), len(y_hat)),
+        base_labels=base_labels
     ))
     ts_plot.rect(x='event', y='cat_height', width=1, height=y_range, source=source,
                  fill_color={
