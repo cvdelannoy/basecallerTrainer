@@ -1,4 +1,4 @@
-from ClassificationBidirectionalRnn import  ClassificationBidirectionalRnn
+from OrdinalBidirectionalRnn import OrdinalBidirectionalRnn
 import os
 import random
 import itertools
@@ -6,7 +6,6 @@ import tensorflow as tf
 
 import reader
 import helper_functions
-
 
 from bokeh.io import save, output_file
 
@@ -19,8 +18,7 @@ ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simts_
 ts_list = os.listdir(ts_path)
 
 # Define path to tensorboard parent directory
-tb_path = '/mnt/nexenta/lanno001/nobackup/tensorboardFiles/classification/'
-
+tb_path = '/mnt/nexenta/lanno001/nobackup/tensorboardFiles/'
 
 # Define hyper-parameters
 batch_size = 64
@@ -53,26 +51,35 @@ param_combos = itertools.product(batch_size_list,
                                  optimizer_list,
                                  num_layers_list)
 
+
+restart_skip = 1
+restart_skip_counter = 0
+
 for (batch_size, cell_type, learning_rate, layer_size, optimizer, num_layers) in param_combos:
     input_size = layer_size
 
+    restart_skip_counter += 1
+    if restart_skip_counter <= restart_skip:
+        continue
+
     # Define path to additional graphs
-    graph_path = ('/mnt/nexenta/lanno001/nobackup/hpTraceGraphs/classification_%s_batchSize'
+    graph_path = ('/mnt/nexenta/lanno001/nobackup/hpTraceGraphs/ordinal_%s_batchSize'
                   '%s_learningRate%s_layerSize%s_%s_numLayers%s/' % (
-                      cell_type,
-                      batch_size,
-                      learning_rate,
-                      layer_size,
-                      optimizer,
-                      num_layers))
+                                                               cell_type,
+                                                               batch_size,
+                                                               learning_rate,
+                                                               layer_size,
+                                                               optimizer,
+                                                               num_layers))
     if not os.path.isdir(graph_path):
         os.mkdir(graph_path)
 
-    tst = ClassificationBidirectionalRnn(batch_size, input_size, num_layers, read_length, cell_type, layer_size,
+    tst = OrdinalBidirectionalRnn(batch_size, input_size, num_layers, read_length, cell_type, layer_size,
                                   optimizer, num_classes, learning_rate, dropout_keep_prob)
     tst.initialize_model(params=None)
 
     for epoch_index in range(num_epochs):
+        random.shuffle(tr_list)
         file_writer = helper_functions.set_logfolder(tst, tb_path, epoch_index)
         tr_index = 0; ts_index = 0
         for tr in tr_list:
@@ -92,6 +99,8 @@ for (batch_size, cell_type, learning_rate, layer_size, optimizer, num_layers) in
                     raw = raw[:len(y_hat)]
                     base_labels = base_labels[:len(y_hat)]
                     ts_plot = helper_functions.plot_timeseries(raw, base_labels, y_hat, tst)
-                    output_file('%stimeseries_ordinal_ep%d_step%d.html' % (graph_path, epoch_index, tr_index))
+                    output_file('%stimeseries_ordinal_ep%d_step%d.html' % (graph_path,
+                                                                           epoch_index,
+                                                                           tr_index))
                     save(ts_plot)
     tf.reset_default_graph()

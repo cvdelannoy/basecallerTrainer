@@ -8,7 +8,7 @@ import re
 
 import readsim_model as rsm
 
-parser = argparse.ArgumentParser(description='Create training reads for homopolymer RNN training in npz-format,'
+parser = argparse.ArgumentParser(description='Create training reads for RNN training in npz-format,'
                                              'with same characteristics as input read(s).')
 parser.add_argument('real_reads', type=str, nargs='+',
                     help='Actual fast5-format MinION read or list of reads on which event characteristics'
@@ -21,14 +21,22 @@ parser.add_argument('--nb-reads', type=int, default=1000, required=False,
                     help='Number of reads to simulate.')
 parser.add_argument('--nb-bases', type=int, default=10000, required=False,
                     help='Average number of bases per simulated read.')
+parser.add_argument('-s', '--signal-sd', type=float, default=1.0, required=False,
+                    help='standard deviation of noise added to signal')
 parser.add_argument('--event-duration', type=int, default=8, required=False,
                     help='Average number of raw data points per event.')
 parser.add_argument('--hp-prob', type=float, default=0.01, required=False,
                     help='Probability of including additional homopolymer events.')
 parser.add_argument('--hp-length', type=int, default=10, required=False,
                     help='Length of added homopolymer events.')
-parser.add_argument('--multiclass', action='store_true',
-                    help='Instead of onehot-encoding, use multiclass to also denote before and after events.')
+parser.add_argument('--event-duration-sd', type=int, default=1, required=False,
+                    help='standard deviation of normal distribution around event length')
+parser.add_argument('--five-class', action='store_true',
+                    help='Use five-class homopolymer encoding.(5th class is hp)')
+parser.add_argument('--eight-class', action='store_true',
+                    help='Use eight-class homopolymer encoding. (5th class is hp)')
+parser.add_argument('--basecall-training1', action='store_true',
+                    help='create training set to recognize the middle trimer per kmer in 4 classes')
 args = parser.parse_args()
 
 if not len(args.real_reads):
@@ -39,36 +47,6 @@ if args.out_path[-1] != '/':
 
 if not os.path.exists(args.out_path):
     os.mkdir(args.out_path)
-
-# DEBUGGING ARGS
-# poremodel_path = '~/.local/lib/python3.5/site-packages/albacore/data_versioned/'
-# realreads_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman/'
-# out_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr/'
-#
-# k_length = 5
-# nb_reads = 1000
-# nb_bases = 10000
-# event_duration = 8
-# hp_prob = 0.01
-# hp_length = [10]
-# noise = 0
-
-def hp_class_number(base,kmer):
-    k_length = len(kmer)
-    pat = re.compile(base)
-    pat_index = [m.start(0) for m in pat.finditer(kmer)]
-    lst = [i in pat_index for i in range(k_length)]
-    ccf = 0; ccr = 0; boolf=True; boolr=True
-    for i in range(k_length):
-        if not lst[i]:
-            boolf = False  # If series of trues stops in fwd direction, stop adding
-        if not lst[-i-1]:
-            boolr = False # If series of trues stops in bwd direction, stop adding
-        if not boolf and not boolr:
-            break  # If both series are discontinued, stop iterating
-        ccf += boolf; ccr += boolr
-    cc = max([ccf, ccr]) - 1  # -1 as a single match to the base is not a start of a hompolymer stretch
-    return(max([ccf, ccr, 1]) - 1)  # -1 as starting with base is not sign of hp
 
 bases = ['A', 'C', 'G', 'T']
 hp_seqs = [i*args.k_length for i in bases]
@@ -84,6 +62,43 @@ while ri <= len(args.real_reads):
 if not sim.all_kmers_present:
     raise ValueError('None of provided reads represent all k-mer values, which is required for simulation.')
 
+def hp_class_number(kmer):
+    k_length = len(kmer)
+    class_list = []
+    for base in [kmer[0], kmer[-1]]:
+        pat = re.compile(base)
+        pat_index = [m.start(0) for m in pat.finditer(kmer)]
+        lst = [i in pat_index for i in range(k_length)]
+        ccf = 0; ccr = 0; boolf=True; boolr=True
+        for i in range(k_length):
+            if not lst[i]:
+                boolf = False  # If series of trues stops in fwd direction, stop adding
+            if not lst[-i-1]:
+                boolr = False  # If series of trues stops in bwd direction, stop adding
+            if not boolf and not boolr:
+                break  # If both series are discontinued, stop iterating
+            ccf += boolf; ccr += boolr
+        class_list += [ccf, ccr]
+    return max(class_list + [1])  # return Nb in range 1( = no dimer at start) - k( = homopolymer)
+
+cl1 = ['GGT','GGA', 'AGT','GGG','AGG','GAT','AGA','GAG','GAA','CGT','CGA','AAT','TGA','CGG','AAG','TGT']
+cl2 = ['GGC','AAA','GAC','CAT','CAG','AGC','TGG','TAT','CAA','TAG','AAC','CGC','TAA','TGC','CAC','TAC']
+cl3 = ['GCT', 'CCT', 'TCT', 'ACT','CCG','TTT','GTT','GCG','TCG','CTT','GCA','ACG','CCA','TCA','ATT','ACA']
+cl4 = ['CCC', 'TTG', 'TCC', 'GTA','TTA','GTG','GCC','CTG','ACC', 'CTA','ATG','ATA','TTC','GTC','CTC','ATC']
+def trimer_class_number(kmer):
+    mid = len(kmer)//2 + 1
+    trimer = kmer[mid-2:mid+1]
+    if trimer in cl1:
+        return 1
+    if trimer in cl2:
+        return 2
+    if trimer in cl3:
+        return 3
+    if trimer in cl4:
+        return 4
+    raise ValueError('trimer not recognized.')
+
+
 # Start read simulation
 for nri in range(args.nb_reads):
     raw = np.empty(0, dtype=np.float32)
@@ -96,23 +111,26 @@ for nri in range(args.nb_reads):
             cur_hp_length -= 1
         else:
             base = random.choice(bases)
-            if cur_encoded == 0:
-                hp_base = base  # If currently coming from homopolymer region, do NOT change ref base!
-            is_hp = random.random() < args.hp_prob
-            if is_hp:
+            if random.random() < args.hp_prob:
                 cur_hp_length = args.hp_length
         sequence += base
         cur_kmer = sequence[-args.k_length:]
-        cur_raw = np.repeat(sim.raw_avg[cur_kmer], args.event_duration)
+        cur_event_duration = round(np.random.normal(args.event_duration, args.event_duration_sd))
+        if cur_event_duration < 1:
+            cur_event_duration = 1
+        cur_raw = np.repeat(sim.raw_avg[cur_kmer], cur_event_duration)
         raw = np.concatenate((raw, cur_raw))
-        base_labels = np.concatenate((base_labels, [cur_kmer] * args.event_duration))
-        if args.multiclass:
-            cur_encoded = hp_class_number(hp_base, cur_kmer)
+        base_labels = np.concatenate((base_labels, [cur_kmer] * cur_event_duration))
+        if args.five_class:
+            cur_encoded = hp_class_number(cur_kmer)
+        elif args.basecall_training1:
+            cur_encoded = trimer_class_number(cur_kmer)
         else:
             cur_encoded = np.any(np.repeat(cur_kmer, len(hp_seqs)) == hp_seqs)
-        encoded = np.concatenate((encoded, np.repeat(cur_encoded, args.event_duration)))
-    outName = args.out_path + os.path.basename(read)[:-6] + '_sim_onehot_'+ str(nri) + '.npz'
+        encoded = np.concatenate((encoded, np.repeat(cur_encoded, cur_event_duration)))
+    outName = args.out_path + os.path.basename(read)[:-6] + '_sim_onehot_' + str(nri) + '.npz'
     # sequence = np.array(list(sequence),dtype='str')
+    raw += np.random.normal(0, args.signal_sd, size=raw.size)  # Add noise
     np.savez(outName, raw=raw, onehot=encoded, base_labels=base_labels, sequence=sequence)
     if nri != 0 and nri % 100 == 0:
         print('%d reads simulated' % nri)

@@ -42,14 +42,15 @@ class BidirectionalRnn(object):
         self.w = tf.Variable(tf.random_normal([2 * layer_size, num_classes]))
         self.b = tf.Variable(np.zeros([num_classes], dtype=np.float32))
         self.x = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
-        self.y = tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
-        # self.y = tf.unstack(self.y_placeholder, self.nb_steps, 1)  # to sub
-        # self.x = tf.unstack(self.x_placeholder, self.nb_steps, 1)  # to sub
-        self.y_hat_logit = self.construct_brnn()  # NOTE: NO SIGMOID YET!
+        self.y = self.set_y()
+        # self.y = tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
+        self.y_hat_logit = self.construct_brnn()  # NOTE: NO SIGMOID YET --> range (-inf,inf)
+
+        self.loss = self.calculate_cost()
         self.tb_summary = self.construct_evaluation()
-        # self.tb_summary = None
 
         self.session = None
+        self.name_optimizer = name_optimizer
         self.optimizer = name_optimizer
         # self._optimizer = None
 
@@ -98,13 +99,18 @@ class BidirectionalRnn(object):
                                                                  inputs=tf.unstack(self.x, self.nb_steps, 1),
                                                                  dtype=tf.float32)
         y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
-        return tf.stack(y_hat, axis=1)
+        return tf.squeeze(tf.stack(y_hat, axis=1))  # squeeze to remove dimensions of 1
 
     @optimizer.setter
     def optimizer(self, name_optimizer):
-        loss = self.calculate_cost()
+        # self.loss = self.calculate_cost()
         if name_optimizer == 'adam':
-            self._optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(loss)
+            # epsilon parameter improves numerical stability(?)
+            self._optimizer = tf.train.AdamOptimizer(self.learning_rate, epsilon=0.1).minimize(self.loss)
+        elif name_optimizer == 'adagrad':
+            self._optimizer = tf.train.AdagradOptimizer(self.learning_rate).minimize(self.loss)
+        elif name_optimizer == 'adadelta':
+            self._optimizer = tf.train.AdadeltaOptimizer(self.learning_rate).minimize(self.loss)
         else:
             raise ValueError('Given optimizer name %s not recognized' % name_optimizer)
 
@@ -145,41 +151,88 @@ class BidirectionalRnn(object):
     def evalulate_model(self, raw, labels):
         raw_reshape = self.reshape_raw(raw)
         labels_reshape = self.reshape_labels(labels)
-        tb_summary = self.session.run(self.tb_summary, feed_dict={
+        tb_summary, loss = self.session.run([self.tb_summary, self.loss], feed_dict={
             self.x: raw_reshape,
             self.y: labels_reshape
         })
-        return tb_summary
+        return tb_summary, loss
 
     def predict(self, raw):
         raw_reshape = self.reshape_raw(raw)
         y_hat = self.session.run(self.y_hat, feed_dict={
             self.x: raw_reshape
         })
-        return y_hat
+        padding = np.repeat(np.NaN, self.label_shift)
+        y_hat = y_hat.reshape(-1)
+        # if self.perform_sanity_check:
+        #     y_hat_s1 = np.roll(y_hat, -1)
+        #     non_sequential_index = np.argwhere((y_hat - y_hat_s1) > 1)
+        # Add padding, revert from batches to 1D
+        return np.concatenate((padding, y_hat, padding))
+
+    def construct_evaluation(self):
+        with tf.name_scope('Performance_assessment'):
+            # Overall accuracy
+            accuracy = tf.reduce_mean(tf.cast(tf.equal(self.y_multiclass, self.y_hat), dtype=tf.float32))
+
+            # per class accuracy
+            accuracy_list = []
+            for i in range(1,self.num_classes+1):
+                cm = tf.constant(i, shape=[self.batch_size, self.nb_steps], dtype=tf.int32)
+                y_bin = tf.cast(tf.equal(self.y_multiclass, cm), dtype=tf.int32)
+                y_hat_bin = tf.cast(tf.equal(self.y_hat, cm), dtype=tf.int32)
+                accuracy_class = tf.reduce_mean(tf.cast(tf.equal(y_bin, y_hat_bin), dtype=tf.float32))
+                accuracy_list.append(accuracy_class)
+            # TPR and TNR for HPs
+                # if i == (self.num_classes - 1):
+            TP = tf.count_nonzero(tf.multiply(y_bin, y_hat_bin))
+            TN = tf.count_nonzero(tf.multiply(y_bin - 1, y_hat_bin - 1))
+            TPR = TP / tf.count_nonzero(y_bin)
+            TNR = TN / tf.count_nonzero(y_bin - 1)
+
+        with tf.name_scope('tensorboard_summaries'):
+            tf.summary.scalar('loss', self.loss)
+            tf.summary.scalar('TPR', TPR)
+            tf.summary.scalar('TNR', TNR)
+            tf.summary.scalar('accuracy', accuracy)
+            for i in range(self.num_classes):
+                tf.summary.scalar('accuracy_class%d' % (i+1), accuracy_list[i])
+        return tf.summary.merge_all()
+
+
+
 
     @abc.abstractmethod
     def calculate_cost(self):
         """
         Calculate cost using cost function defined in subclass 
         """
-        return ValueError('cost function not implemented for class')
+        raise ValueError('cost function not implemented for class')
 
-    @abc.abstractmethod
-    def construct_evaluation(self):
-        """
-        Define evaluation metrics and define how to calculate them 
-        """
-        return ValueError('Evaluation metrics not defined for class')
+    # @abc.abstractmethod
+    # def construct_evaluation(self):
+    #     """
+    #     Define evaluation metrics and define how to calculate them
+    #     """
+    #     raise ValueError('Evaluation metrics not defined for class')
 
     @abc.abstractmethod
     def reshape_labels(self, labels):
         """
         Reshape data into form accepted by cost function
         """
-        return ValueError('Label reshape function not implemented for class')
+        raise ValueError('Label reshape function not implemented for class')
+
+    @abc.abstractmethod
+    def set_y(self):
+        raise ValueError('y not defined in class')
 
     @property
     @abc.abstractmethod
     def y_hat(self):
-        return ValueError('conversion of NN output to prediction not implemented for class')
+        raise ValueError('conversion of NN output to prediction not implemented for class')
+
+    @property
+    @abc.abstractmethod
+    def y_multiclass(self):
+        raise ValueError('y_multiclass not defined in class')

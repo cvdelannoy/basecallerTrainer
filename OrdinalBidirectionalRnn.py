@@ -2,54 +2,39 @@ import tensorflow as tf
 import numpy as np
 from BidirectionalRnn import BidirectionalRnn
 # import cas.RWACell as rwa
-
 # from cached_property import cached_property
 
 
 class OrdinalBidirectionalRnn(BidirectionalRnn):
 
+    def set_y(self):
+        return tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
+
+    @property
+    def y_multiclass(self):
+        """
+        Convert ordinal one-hot labels back to single-file classification labels 
+        """
+        y_hat = tf.cast(tf.round(tf.reduce_sum(self.y, axis=-1)), dtype=tf.int32)
+        return y_hat
+
     @property
     def y_hat(self):
-        y_hat = tf.cast(tf.round(tf.reduce_sum(tf.sigmoid(self.y_hat_logit), axis=-1)), dtype=tf.int32)
-        y_hat = tf.reshape(y_hat, shape=[-1])
-        padding = np.repeat(np.nan,self.label_shift)
-        return tf.concat((padding,y_hat,padding),axis=0)
+        y_hat = tf.cast(tf.round(tf.sigmoid(self.y_hat_logit)), dtype=tf.int32)
+        y_hat_out = tf.ones([self.batch_size, self.nb_steps, 1], dtype=tf.int32)
+        for n in range(2, self.num_classes + 1):
+            cm = tf.ones([self.batch_size, self.nb_steps, n], dtype=tf.int32)
+            y_hat_nlayer = tf.equal(y_hat[:,:,:n], cm)
+            y_hat_nlayer = tf.floordiv(tf.reduce_sum(tf.cast(y_hat_nlayer, dtype=tf.int32), axis=-1), n)
+            y_hat_nlayer = tf.expand_dims(y_hat_nlayer, axis=-1)
+            y_hat_out = tf.concat([y_hat_out, y_hat_nlayer], axis=-1)
+        y_hat_out = tf.reduce_sum(y_hat_out, axis=-1)
+        return y_hat_out
 
     def calculate_cost(self):
         losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_hat_logit,
                                                          labels=tf.cast(self.y, dtype=tf.float32))
         return tf.reduce_mean(tf.stack(losses))
-
-    def construct_evaluation(self):
-        with tf.name_scope('Performance_assessment'):
-            # Summary performance metrics
-            y_hat = tf.cast(tf.round(tf.reduce_sum(self.y_hat, axis=-1)), dtype=tf.int32)
-            y = tf.cast(tf.round(tf.reduce_sum(self.y, axis=-1)), dtype=tf.int32)
-            # Overall accuracy
-            accuracy = tf.reduce_mean(tf.cast(tf.equal(y, y_hat), dtype=tf.float32))
-
-            # per class accuracy
-            accuracy_list = []
-            for i in range(self.num_classes):
-                cm = tf.constant(i, shape=[self.batch_size, self.nb_steps], dtype=tf.int32)
-                y_bin = tf.cast(tf.equal(y, cm), dtype=tf.int32)
-                y_hat_bin = tf.cast(tf.equal(y_hat, cm), dtype=tf.int32)
-                accuracy_class = tf.reduce_mean(tf.cast(tf.equal(y_bin, y_hat_bin), dtype=tf.float32))
-                accuracy_list.append(accuracy_class)
-                # TPR and TNR for HPs
-                if i == (self.num_classes - 1):
-                    TP = tf.count_nonzero(tf.multiply(y_bin, y_hat_bin))
-                    TN = tf.count_nonzero(tf.multiply(y_bin - 1, y_hat_bin - 1))
-                    TPR = TP / tf.count_nonzero(y_bin)
-                    TNR = TN / tf.count_nonzero(y_bin - 1)
-
-        with tf.name_scope('tensorboard_summaries'):
-            tf.summary.scalar('TPR', TPR)
-            tf.summary.scalar('TNR', TNR)
-            tf.summary.scalar('accuracy', accuracy)
-            for i in range(self.num_classes):
-                tf.summary.scalar('accuracy_class%d' % i, accuracy_list[i])
-        return tf.summary.merge_all()
 
     def reshape_labels(self, labels):
         labels_reshape = np.zeros((labels.size - self.input_size + 1, self.num_classes), dtype=int)
