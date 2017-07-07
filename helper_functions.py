@@ -32,13 +32,16 @@ def set_logfolder(brnn_object, parent_dir, epoch_index):
     return tf.summary.FileWriter(cur_tb_path, brnn_object.session.graph)
 
 
-def plot_timeseries(raw, base_labels, y_hat, brnn_object):
+def plot_timeseries(raw, base_labels, y_hat, brnn_object, categorical=False):
     ts_plot = figure(title='Classified time series')
     ts_plot.grid.grid_line_alpha = 0.3
     ts_plot.xaxis.axis_label = 'nb events'
     ts_plot.yaxis.axis_label = 'current signal'
     y_range = raw.max() - raw.min()
-    colors = ['#ffffff', '#fff7ec', '#fee8c8', '#fdd49e', '#fdbb84', '#fc8d59', '#ef6548', '#d7301f', '#990000']
+    if categorical == True:
+        colors = ['#8dd3c7','#ffffb3','#bebada','#fb8072']
+    else:
+        colors = ['#ffffff', '#fff7ec', '#fee8c8', '#fdd49e', '#fdbb84', '#fc8d59', '#ef6548', '#d7301f', '#990000']
     col_mapper = LinearColorMapper(palette=colors, low=1, high=brnn_object.num_classes)
     # col_mapper = CategoricalColorMapper(factors=list(range(brnn_object.num_classes)), palette=colors)
     source = ColumnDataSource(dict(
@@ -54,7 +57,13 @@ def plot_timeseries(raw, base_labels, y_hat, brnn_object):
                      'transform': col_mapper
                  },
                  line_color=None)
-    base_labels_labelset = LabelSet(x='event', y='cat_height',
+    if categorical:
+        base_labels_labelset = LabelSet(x='event', y='cat_height',
+                                        y_offset=-y_range,
+                                        text='base_labels', text_baseline='middle',
+                                        source=source)
+    else:
+        base_labels_labelset = LabelSet(x='event', y='cat_height',
                                     y_offset=-y_range, angle=-0.5 * pi,
                                     text='base_labels', text_baseline='middle',
                                     source=source)
@@ -64,3 +73,16 @@ def plot_timeseries(raw, base_labels, y_hat, brnn_object):
     ts_plot.plot_height = 500
     ts_plot.x_range = Range1d(0, 500)
     return ts_plot
+
+def normalize_raw_signal(raw, norm_method):
+    """
+    Normalize the raw DAC values
+     
+    """
+    # Median normalization, as done by nanoraw (see nanoraw_helper.py)
+    if norm_method == 'median':
+        shift = np.median(raw)
+        scale = np.median(np.abs(raw - shift))
+    else:
+        raise ValueError('norm_method not recognized')
+    return (raw - shift) / scale

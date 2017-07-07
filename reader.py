@@ -11,7 +11,7 @@ def npz_to_tf(npz, total_series_length, name=None):
 
     # If read length is smaller than set series length, discard
     if npz_read['raw'].size < total_series_length:
-        return None, None
+        return None, None, None
 
     raw = npz_read['raw'][0:(total_series_length)]
     onehot = npz_read['onehot'][0:(total_series_length)]

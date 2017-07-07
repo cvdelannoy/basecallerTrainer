@@ -32,8 +32,17 @@ class OrdinalBidirectionalRnn(BidirectionalRnn):
         return y_hat_out
 
     def calculate_cost(self):
-        losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_hat_logit,
-                                                         labels=tf.cast(self.y, dtype=tf.float32))
+        # losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=self.y_hat_logit,
+        #                                                  labels=tf.cast(self.y, dtype=tf.float32))
+        losses = []
+        for cl in range(self.num_classes):
+            pos_examples = tf.reduce_sum(self.y[:,:,cl])
+            pos_weight = tf.cast(pos_examples / (self.batch_size * self.nb_steps - pos_examples + 1), dtype=tf.float32)
+            cur_loss = tf.nn.weighted_cross_entropy_with_logits(targets=tf.cast(self.y[:,:,cl], dtype=tf.float32),
+                                                                logits=self.y_hat_logit[:,:,cl],
+                                                                pos_weight=pos_weight)
+            losses += [cur_loss]
+
         return tf.reduce_mean(tf.stack(losses))
 
     def reshape_labels(self, labels):

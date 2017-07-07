@@ -4,8 +4,8 @@ import h5py
 import random
 import os
 import argparse
-import re
 
+import training_encodings
 import readsim_model as rsm
 
 parser = argparse.ArgumentParser(description='Create training reads for RNN training in npz-format,'
@@ -35,8 +35,10 @@ parser.add_argument('--five-class', action='store_true',
                     help='Use five-class homopolymer encoding.(5th class is hp)')
 parser.add_argument('--eight-class', action='store_true',
                     help='Use eight-class homopolymer encoding. (5th class is hp)')
-parser.add_argument('--basecall-training1', action='store_true',
+parser.add_argument('--basecall-training-trimers', action='store_true',
                     help='create training set to recognize the middle trimer per kmer in 4 classes')
+parser.add_argument('--basecall-training-pu-py', action='store_true',
+                    help='create training set to recognize purines and pyrimidines')
 args = parser.parse_args()
 
 if not len(args.real_reads):
@@ -62,42 +64,6 @@ while ri <= len(args.real_reads):
 if not sim.all_kmers_present:
     raise ValueError('None of provided reads represent all k-mer values, which is required for simulation.')
 
-def hp_class_number(kmer):
-    k_length = len(kmer)
-    class_list = []
-    for base in [kmer[0], kmer[-1]]:
-        pat = re.compile(base)
-        pat_index = [m.start(0) for m in pat.finditer(kmer)]
-        lst = [i in pat_index for i in range(k_length)]
-        ccf = 0; ccr = 0; boolf=True; boolr=True
-        for i in range(k_length):
-            if not lst[i]:
-                boolf = False  # If series of trues stops in fwd direction, stop adding
-            if not lst[-i-1]:
-                boolr = False  # If series of trues stops in bwd direction, stop adding
-            if not boolf and not boolr:
-                break  # If both series are discontinued, stop iterating
-            ccf += boolf; ccr += boolr
-        class_list += [ccf, ccr]
-    return max(class_list + [1])  # return Nb in range 1( = no dimer at start) - k( = homopolymer)
-
-cl1 = ['GGT','GGA', 'AGT','GGG','AGG','GAT','AGA','GAG','GAA','CGT','CGA','AAT','TGA','CGG','AAG','TGT']
-cl2 = ['GGC','AAA','GAC','CAT','CAG','AGC','TGG','TAT','CAA','TAG','AAC','CGC','TAA','TGC','CAC','TAC']
-cl3 = ['GCT', 'CCT', 'TCT', 'ACT','CCG','TTT','GTT','GCG','TCG','CTT','GCA','ACG','CCA','TCA','ATT','ACA']
-cl4 = ['CCC', 'TTG', 'TCC', 'GTA','TTA','GTG','GCC','CTG','ACC', 'CTA','ATG','ATA','TTC','GTC','CTC','ATC']
-def trimer_class_number(kmer):
-    mid = len(kmer)//2 + 1
-    trimer = kmer[mid-2:mid+1]
-    if trimer in cl1:
-        return 1
-    if trimer in cl2:
-        return 2
-    if trimer in cl3:
-        return 3
-    if trimer in cl4:
-        return 4
-    raise ValueError('trimer not recognized.')
-
 
 # Start read simulation
 for nri in range(args.nb_reads):
@@ -122,9 +88,11 @@ for nri in range(args.nb_reads):
         raw = np.concatenate((raw, cur_raw))
         base_labels = np.concatenate((base_labels, [cur_kmer] * cur_event_duration))
         if args.five_class:
-            cur_encoded = hp_class_number(cur_kmer)
-        elif args.basecall_training1:
-            cur_encoded = trimer_class_number(cur_kmer)
+            cur_encoded = training_encodings.hp_class_number(cur_kmer)
+        elif args.basecall_training_trimers:
+            cur_encoded = training_encodings.trimer_class_number(cur_kmer)
+        elif args.basecall_training_pu_py:
+            cur_encoded = training_encodings.pu_py_class_number(cur_kmer)
         else:
             cur_encoded = np.any(np.repeat(cur_kmer, len(hp_seqs)) == hp_seqs)
         encoded = np.concatenate((encoded, np.repeat(cur_encoded, cur_event_duration)))

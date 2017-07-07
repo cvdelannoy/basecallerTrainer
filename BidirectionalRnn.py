@@ -23,7 +23,8 @@ class BidirectionalRnn(object):
                  name_optimizer,
                  num_classes,
                  learning_rate,
-                 dropout_keep_prob
+                 dropout_keep_prob,
+
                  ):
         self.read_length = read_length
         self.batch_size = batch_size
@@ -47,7 +48,8 @@ class BidirectionalRnn(object):
         self.y_hat_logit = self.construct_brnn()  # NOTE: NO SIGMOID YET --> range (-inf,inf)
 
         self.loss = self.calculate_cost()
-        self.tb_summary = self.construct_evaluation()
+        self.tb_summary = self.construct_evaluation('all_metrics')
+        self.tb_roc = self.construct_evaluation('roc')
 
         self.session = None
         self.name_optimizer = name_optimizer
@@ -148,13 +150,21 @@ class BidirectionalRnn(object):
             self.y: labels_reshape
         })
 
-    def evalulate_model(self, raw, labels):
+    def evalulate_model(self, raw, labels, mode='all_metrics'):
         raw_reshape = self.reshape_raw(raw)
         labels_reshape = self.reshape_labels(labels)
-        tb_summary, loss = self.session.run([self.tb_summary, self.loss], feed_dict={
-            self.x: raw_reshape,
-            self.y: labels_reshape
-        })
+        if mode == 'all_metrics':
+            tb_summary, loss = self.session.run([self.tb_summary, self.loss], feed_dict={
+                self.x: raw_reshape,
+                self.y: labels_reshape
+            })
+        elif mode == 'roc':
+            tb_summary, loss = self.session.run([self.tb_roc, self.loss], feed_dict={
+                self.x: raw_reshape,
+                self.y: labels_reshape
+            })
+        else:
+            raise ValueError('%s evaluation mode not recognized' % mode)
         return tb_summary, loss
 
     def predict(self, raw):
@@ -170,7 +180,7 @@ class BidirectionalRnn(object):
         # Add padding, revert from batches to 1D
         return np.concatenate((padding, y_hat, padding))
 
-    def construct_evaluation(self):
+    def construct_evaluation(self, mode):
         with tf.name_scope('Performance_assessment'):
             # Overall accuracy
             accuracy = tf.reduce_mean(tf.cast(tf.equal(self.y_multiclass, self.y_hat), dtype=tf.float32))
@@ -191,12 +201,14 @@ class BidirectionalRnn(object):
             TNR = TN / tf.count_nonzero(y_bin - 1)
 
         with tf.name_scope('tensorboard_summaries'):
-            tf.summary.scalar('loss', self.loss)
-            tf.summary.scalar('TPR', TPR)
-            tf.summary.scalar('TNR', TNR)
-            tf.summary.scalar('accuracy', accuracy)
-            for i in range(self.num_classes):
-                tf.summary.scalar('accuracy_class%d' % (i+1), accuracy_list[i])
+            if mode in ['all_metrics','roc']:
+                tf.summary.scalar('TPR', TPR)
+                tf.summary.scalar('TNR', TNR)
+            if mode in ['all_metrics']:
+                tf.summary.scalar('loss', self.loss)
+                tf.summary.scalar('accuracy', accuracy)
+                for i in range(self.num_classes):
+                    tf.summary.scalar('accuracy_class%d' % (i+1), accuracy_list[i])
         return tf.summary.merge_all()
 
 
