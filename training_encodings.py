@@ -27,8 +27,14 @@ cl4 = ['CCC', 'TTG', 'TCC', 'GTA', 'TTA', 'GTG', 'GCC', 'CTG', 'ACC', 'CTA', 'AT
 
 
 def hp_class_number(kmer):
+    """
+    Classify homopolymer-containing k-mers using a len(kmer)-class system
+    """
+
     k_length = len(kmer)
     class_list = []
+    if 'N' in kmer:  # always classify as 1 if kmer contains unknown base
+        return 1
     for base in [kmer[0], kmer[-1]]:
         pat = re.compile(base)
         pat_index = [m.start(0) for m in pat.finditer(kmer)]
@@ -72,6 +78,10 @@ def pu_py_class_number(kmer):
         return 2
 
 def dt_class_number(kmer):
+    """
+    Classify dinucleotides-containing k-mers using a len(kmer)-class system
+    """
+    # TODO not finished
     k_length = len(kmer)
     class_list = []
     for base in [kmer[0], kmer[-1]]:

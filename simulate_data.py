@@ -7,11 +7,12 @@ import argparse
 
 import training_encodings
 import readsim_model as rsm
+from helper_functions import normalize_raw_signal
 
 parser = argparse.ArgumentParser(description='Create training reads for RNN training in npz-format,'
                                              'with same characteristics as input read(s).')
 parser.add_argument('real_reads', type=str, nargs='+',
-                    help='Actual fast5-format MinION read or list of reads on which event characteristics'
+                    help='Actual fast5-format MinION read, list of reads (or directory) on which event characteristics'
                          'will be based.')
 parser.add_argument('-o', '--out-path', type=str, required=True,
                     help='Folder in which simulated reads should be saved. (Is created if not existing).')
@@ -21,10 +22,12 @@ parser.add_argument('--nb-reads', type=int, default=1000, required=False,
                     help='Number of reads to simulate.')
 parser.add_argument('--nb-bases', type=int, default=10000, required=False,
                     help='Average number of bases per simulated read.')
-parser.add_argument('-s', '--signal-sd', type=float, default=1.0, required=False,
-                    help='standard deviation of noise added to signal')
+parser.add_argument('-s', '--add-noise', action='store_true', required=False,
+                    help='Add normal noise to signal, with sd as encountered in real reads.')
 parser.add_argument('--event-duration', type=int, default=8, required=False,
                     help='Average number of raw data points per event.')
+parser.add_argument('--normalization', type=str, required=False, default='median',
+                    help='Specify how the raw data should be normalized.')
 parser.add_argument('--hp-prob', type=float, default=0.01, required=False,
                     help='Probability of including additional homopolymer events.')
 parser.add_argument('--hp-length', type=int, default=10, required=False,
@@ -43,6 +46,8 @@ args = parser.parse_args()
 
 if not len(args.real_reads):
     raise ValueError('Supply at least one real_read.')
+if len(args.real_reads) == 1 and os.path.isdir(args.real_reads[0]):
+    args.real_reads = [args.real_reads[0] + rn for rn in os.listdir(args.real_reads[0])]
 
 if args.out_path[-1] != '/':
     args.out_path += '/'
@@ -85,6 +90,8 @@ for nri in range(args.nb_reads):
         if cur_event_duration < 1:
             cur_event_duration = 1
         cur_raw = np.repeat(sim.raw_avg[cur_kmer], cur_event_duration)
+        if args.add_noise:
+            cur_raw += np.random.normal(cur_raw, sim.raw_stdv[cur_kmer])
         raw = np.concatenate((raw, cur_raw))
         base_labels = np.concatenate((base_labels, [cur_kmer] * cur_event_duration))
         if args.five_class:
@@ -97,8 +104,8 @@ for nri in range(args.nb_reads):
             cur_encoded = np.any(np.repeat(cur_kmer, len(hp_seqs)) == hp_seqs)
         encoded = np.concatenate((encoded, np.repeat(cur_encoded, cur_event_duration)))
     outName = args.out_path + os.path.basename(read)[:-6] + '_sim_onehot_' + str(nri) + '.npz'
-    # sequence = np.array(list(sequence),dtype='str')
-    raw += np.random.normal(0, args.signal_sd, size=raw.size)  # Add noise
+
+    raw = normalize_raw_signal(raw, args.normalization)# Normalize signal
     np.savez(outName, raw=raw, onehot=encoded, base_labels=base_labels, sequence=sequence)
     if nri != 0 and nri % 100 == 0:
         print('%d reads simulated' % nri)

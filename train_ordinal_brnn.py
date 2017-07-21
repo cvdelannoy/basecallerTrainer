@@ -1,37 +1,29 @@
-from OrdinalBidirectionalRnn import OrdinalBidirectionalRnn
+import argparse
+from bokeh.io import save, output_file
+import h5py
+from math import isnan
+import numpy as np
 import os
 import random
-# import itertools
-# import tensorflow as tf
-import numpy as np
-import h5py
 import re
-from math import isnan
+import yaml
 
+from OrdinalBidirectionalRnn import OrdinalBidirectionalRnn
 import reader
 import helper_functions
 import trainingRead
-# import readsim_model
-# import simulate_data
 
-from bokeh.io import save, output_file
+
+
+with open (parameter_file, 'r') as pf:
+    params = yaml.load(pf)
 
 # Define path of training dataset
 tr_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr2_p025_delAffected/'
-# tr_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr2_p025/'
-# tr_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_tr_hp5class_clipped_deletionAffected_oversampled01/'
 tr_list = os.listdir(tr_path)
 
 # Define path of test dataset
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr2_p025/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr2_p025_delAffected/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr_hp5class_hpProb01/'
 ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_tr_hp5class_clipped_deletionAffected/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_tr_hp5class_clipped/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_tr_hp5class_clipped_deletionAffected_oversampled01/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_tr_hp5class_noNanoraw_hp10/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr_hpp0001_equalEventLength_fiveclass_realNoise/'
-# ts_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman_simtr_hpp01_equalEventLength_fiveclass_realNoise/'
 ts_list = os.listdir(ts_path)
 random.shuffle(ts_list)
 ts_list_idx = 0
@@ -44,7 +36,7 @@ tb_path = '/mnt/nexenta/lanno001/nobackup/tensorboardFiles/ordinal_hp_real/disca
 
 # Define hyper-parameters
 batch_size = 32
-cell_type='LSTM'
+cell_type = 'LSTM'
 learning_rate = 0.01
 layer_size = 51
 optimizer = 'adadelta'
@@ -61,37 +53,11 @@ simulate_on_the_fly = False
 additional_plotting = True
 
 min_content_percentage = 0.01
-tr_list = tr_list[:training_iterations]  # TODO: uncomment again after testing simulation on the fly!
+tr_list = tr_list[:training_iterations]
 
 
 bases = ['A', 'C', 'G', 'T']
 hps = [i*5 for i in bases]
-
-# # selected for parameter sweep
-# batch_size_list = [64, 128, 32]
-# cell_type_list = ['LSTM', 'GRU']
-# learning_rate_list = [0.01, 0.1, 0.001]
-# layer_size_list = [101, 51, 2]
-# optimizer_list = ['adam', 'adadelta']
-# num_layers_list = [2, 3]
-#
-# param_combos = itertools.product(batch_size_list,
-#                                  cell_type_list,
-#                                  learning_rate_list,
-#                                  layer_size_list,
-#                                  optimizer_list,
-#                                  num_layers_list)
-#
-#
-# restart_skip = 1
-# restart_skip_counter = 0
-#
-# for (batch_size, cell_type, learning_rate, layer_size, optimizer, num_layers) in param_combos:
-#     input_size = layer_size
-#
-#     restart_skip_counter += 1
-#     if restart_skip_counter <= restart_skip:
-#         continue
 
 # Define path to additional graphs
 graph_path = ('/mnt/nexenta/lanno001/nobackup/hpTraceGraphs/real/ecoliLoman_simtr2_p025/ordinal_%s_batchSize'
@@ -107,15 +73,13 @@ graph_path = ('/mnt/nexenta/lanno001/nobackup/hpTraceGraphs/real/ecoliLoman_simt
 graph_path_timeseries = graph_path+'timeseries/'
 if not os.path.isdir(graph_path):
     os.makedirs(graph_path_timeseries)
-
-if additional_plotting:
-    roc_graph_name = graph_path + 'roc.html'
-    roc_list = []
-    metrics_file_name = graph_path + 'metrics.txt'
-    if os.path.isfile(metrics_file_name):
-        os.remove(metrics_file_name)
-    metrics_file = open(metrics_file_name, "a+")
-    metrics_file.write("TPR\tTNR\tPPV\tqscore\tdels\tins\tmismatch\tmatch\n")
+roc_graph_name = graph_path + 'roc.html'
+roc_list = []
+metrics_file_name = graph_path + 'metrics.txt'
+if os.path.isfile(metrics_file_name):
+    os.remove(metrics_file_name)
+metrics_file = open(metrics_file_name, "a+")
+metrics_file.write("TPR\tTNR\tPPV\tqscore\tdels\tins\tmismatch\tmatch\n")
 
 tst = OrdinalBidirectionalRnn(batch_size, input_size, num_layers, read_length, cell_type, layer_size,
                               optimizer, num_classes, learning_rate, dropout_keep_prob, adaptive_positive_weighting)
@@ -148,10 +112,6 @@ for epoch_index in range(1,num_epochs+1):
             raw, onehot, _ = reader.npz_to_tf(tr_path+tr, read_length)
             if raw is None:
                 continue
-            if onehot.size == 0:  # TODO: remove later! necessary due to error in read generation script
-                os.remove(tr_path+tr)
-                tr_list.remove(tr)
-                continue
         try:
             tst.train_model(raw, onehot)
         except ValueError:
@@ -181,7 +141,7 @@ for epoch_index in range(1,num_epochs+1):
                                                                                                PPV,
                                                                                                nb_hp_raw,
                                                                                                hp_ratio))
-            if additional_plotting and not isnan(TPR) and not isnan(TNR):
+            if not isnan(TPR) and not isnan(TNR):
                 roc_list.append((TPR, TNR, epoch_index))
                 roc_plot = helper_functions.plot_roc_curve(roc_list)
                 output_file(roc_graph_name)
@@ -191,17 +151,15 @@ for epoch_index in range(1,num_epochs+1):
                 metrics = '\t'.join([str(n) for n in metrics]) + '\n'
                 metrics_file.write("%s" % metrics)
 
-            # if not tr_index % 100:
-            #     # y_hat = tst.predict(raw)
-            #     raw = raw[:len(y_hat)]
-            #     base_labels = base_labels[:len(y_hat)]
-            #     ts_plot = helper_functions.plot_timeseries(raw, base_labels, y_hat, tst)
-            #     output_file('%stimeseries_ordinal_ep%d_step%d.html' % (graph_path,
-            #                                                            epoch_index,
-            #                                                            tr_index))
-            #     save(ts_plot)
-
-if additional_plotting:
-    metrics_file.close()
+            if not tr_index % 100:
+                # y_hat = tst.predict(raw)
+                raw = raw[:len(y_hat)]
+                base_labels = base_labels[:len(y_hat)]
+                ts_plot = helper_functions.plot_timeseries(raw, base_labels, y_hat, tst)
+                output_file('%stimeseries_ordinal_ep%d_step%d.html' % (graph_path,
+                                                                       epoch_index,
+                                                                       tr_index))
+                save(ts_plot)
+metrics_file.close()
 
 # tf.reset_default_graph()

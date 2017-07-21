@@ -2,43 +2,33 @@
 import h5py
 import numpy as np
 import re
-from training_encodings import is_valid_encoding_type, valid_encoding_types
 from itertools import compress
 
 import os
 import trainingRead as tr
 import argparse
 
-parser = argparse.ArgumentParser(description='Convert MinION fast5-reads into'
+parser = argparse.ArgumentParser(description='Convert MinION fast5-reads into SMOTE-enriched'
                                              'onehot vectors (in npy-files) with given properties,'
-                                             'for training of neural networks to recognize'
-                                             'those porperties.')
+                                             'for training of neural networks to recognize.')
 inputArg = parser.add_mutually_exclusive_group(required=True)
 parser.add_argument('-o', '--outFolder', type=str, required=True,
                     help='Folder in which results are stored')
-parser.add_argument('-c', '--encoding-type', type=str, required=True,
-                    help='Specify which kind of classification to adhere to. Must be one of the following types: %s'
-                    % ', '.join(valid_encoding_types))
 parser.add_argument('-n', '--normalization', type=str, required=False, default='median',
                     help='Specify how the raw data should be normalized.')
-parser.add_argument('--use-nanoraw', action='store_true',
-                    help='Use nanoraw-correction version of the sequence.')
+parser.add_argument('--kmers', type=int, required=True, default=None,
+                      help='Specify for which k-mers the reads should be enriched.')
 parser.add_argument('--min-content-class', type=int, required=False, default=None,
                       help='Specify a class for which a lower bound in occurance should be defined.')
 parser.add_argument('--min-content-percentage', type=float, required=False, default=None,
                       help='Specify a minimum percentage at which given class should occur. Discard reads that do not'
                            'fulfill the requirement.')
-parser.add_argument('--deletion-affected-only', action='store_true',
-                    help='Mark HP-events affected by deletions.')
 inputArg.add_argument('-i', '--inputFolder', type=str, required=False,
                       help='Specify location of reads')
 inputArg.add_argument('-l', '--inputList', type=str, required=False, nargs='*',
                       help='Specify list of reads')
 
 args = parser.parse_args()
-
-if not is_valid_encoding_type(args.encoding_type):
-    raise ValueError('%s not recognized as a valid encoding type' % args.encoding_type)
 
 outFolder = args.outFolder
 if outFolder[-1] != '/':
@@ -54,11 +44,28 @@ if args.inputFolder is not None:
 else:
     reads = args.inputList
 
+readnb_pattern = "(?<=read)\d+"
+
+# Collect deletion-affected events from reads
+del_affected_examples = []
+for read in reads:
+    readnb = int(re.search(readnb_pattern, read).group())
+    hdf = h5py.File(read, 'r')
+    try:
+        tr_cur = tr.TrainingRead(hdf, readnb, args.normalization, use_nanoraw=args.use_nanoraw)
+    except KeyError:
+        print('HDF5 key error encountered')
+        hdf.close()
+        continue
+    encoded = tr_cur.classify_deletion_affected_events()
+
+
+
 read_count = 0
 success_count = 0
-pattern = "(?<=read)\d+"
+
 for read in reads:
-    readnb = int(re.search(pattern, read).group())
+    readnb = int(re.search(readnb_pattern, read).group())
     hdf = h5py.File(read, 'r')
     read_count += 1
     try:

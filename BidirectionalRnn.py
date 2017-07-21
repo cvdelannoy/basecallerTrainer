@@ -24,7 +24,7 @@ class BidirectionalRnn(object):
                  num_classes,
                  learning_rate,
                  dropout_keep_prob,
-
+                 adaptive_positive_weighting
                  ):
         self.read_length = read_length
         self.batch_size = batch_size
@@ -35,6 +35,7 @@ class BidirectionalRnn(object):
         self.num_classes = num_classes
         self.learning_rate = learning_rate
         self.dropout_keep_prob = dropout_keep_prob
+        self.adaptive_positive_weighting = adaptive_positive_weighting
 
         # (Partially) derived properties
         read_length_extended = (read_length - input_size + 1) * input_size
@@ -43,9 +44,18 @@ class BidirectionalRnn(object):
         self.w = tf.Variable(tf.random_normal([2 * layer_size, num_classes]))
         self.b = tf.Variable(np.zeros([num_classes], dtype=np.float32))
         self.x = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
+        self.is_target_kmer = tf.placeholder(tf.bool, [self.batch_size, self.nb_steps])
         self.y = self.set_y()
         # self.y = tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
         self.y_hat_logit = self.construct_brnn()  # NOTE: NO SIGMOID YET --> range (-inf,inf)
+
+        self.TPR = None
+        self.TNR = None
+        self.PPV = None
+        # self.P = None  # for debugging purposes, remove below this afterward
+        # self.N = None
+        # self.TP = None
+        # self.TN = None
 
         self.loss = self.calculate_cost()
         self.tb_summary = self.construct_evaluation('all_metrics')
@@ -109,6 +119,7 @@ class BidirectionalRnn(object):
         if name_optimizer == 'adam':
             # epsilon parameter improves numerical stability(?)
             self._optimizer = tf.train.AdamOptimizer(self.learning_rate, epsilon=0.1).minimize(self.loss)
+            # self._optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
         elif name_optimizer == 'adagrad':
             self._optimizer = tf.train.AdagradOptimizer(self.learning_rate).minimize(self.loss)
         elif name_optimizer == 'adadelta':
@@ -133,6 +144,16 @@ class BidirectionalRnn(object):
         raw_reshape = raw_reshape.reshape(self.batch_size, self.nb_steps, self.input_size)
         return raw_reshape
 
+    def mark_target_kmers(self, kmers, target_kmers):
+        if kmers is not None and target_kmers is not None:
+            truncated_kmers = kmers[self.label_shift:]
+            is_target_kmer = np.array([1 if km in target_kmers else 0 for km in truncated_kmers])
+            is_target_kmer = is_target_kmer[:self.batch_size * self.nb_steps]
+            is_target_kmer = is_target_kmer.reshape(self.batch_size, self.nb_steps)
+        else:
+            is_target_kmer = np.ones([self.batch_size, self.nb_steps])
+        return is_target_kmer
+
     def initialize_model(self, params):
         self.session = tf.Session()
         if params is None:
@@ -142,30 +163,28 @@ class BidirectionalRnn(object):
             print("Loading model parameters from %s" % params)
             tf.train.Saver(tf.global_variables()).restore(self.session, params)
 
-    def train_model(self, raw, labels):
+    def train_model(self, raw, labels, kmers=None, target_kmers=None):
         raw_reshape = self.reshape_raw(raw)
         labels_reshape = self.reshape_labels(labels)
+        is_target_kmer = self.mark_target_kmers(kmers, target_kmers)
         self.session.run(self.optimizer, feed_dict={
             self.x: raw_reshape,
-            self.y: labels_reshape
+            self.y: labels_reshape,
+            self.is_target_kmer: is_target_kmer
         })
 
-    def evalulate_model(self, raw, labels, mode='all_metrics'):
+    def evaluate_model(self, raw, labels, kmers=None, target_kmers=None):
         raw_reshape = self.reshape_raw(raw)
         labels_reshape = self.reshape_labels(labels)
-        if mode == 'all_metrics':
-            tb_summary, loss = self.session.run([self.tb_summary, self.loss], feed_dict={
-                self.x: raw_reshape,
-                self.y: labels_reshape
+        # If k-mers are supplied, use them to filter out predicted positives outside target kmers
+        is_target_kmer = self.mark_target_kmers(kmers, target_kmers)
+        tb_summary, loss, y_hat, TPR, TNR, PPV = self.session.run([self.tb_summary, self.loss, self.y_hat,
+                                                                   self.TPR, self.TNR, self.PPV], feed_dict={
+            self.x: raw_reshape,
+            self.y: labels_reshape,
+            self.is_target_kmer: is_target_kmer
             })
-        elif mode == 'roc':
-            tb_summary, loss = self.session.run([self.tb_roc, self.loss], feed_dict={
-                self.x: raw_reshape,
-                self.y: labels_reshape
-            })
-        else:
-            raise ValueError('%s evaluation mode not recognized' % mode)
-        return tb_summary, loss
+        return tb_summary, loss, y_hat, TPR, TNR, PPV
 
     def predict(self, raw):
         raw_reshape = self.reshape_raw(raw)
@@ -195,24 +214,32 @@ class BidirectionalRnn(object):
                 accuracy_list.append(accuracy_class)
             # TPR and TNR for HPs
                 # if i == (self.num_classes - 1):
-            TP = tf.count_nonzero(tf.multiply(y_bin, y_hat_bin))
-            TN = tf.count_nonzero(tf.multiply(y_bin - 1, y_hat_bin - 1))
-            TPR = TP / tf.count_nonzero(y_bin)
-            TNR = TN / tf.count_nonzero(y_bin - 1)
+
+            pos_examples_mask = tf.not_equal(tf.reduce_sum(y_bin, axis=1), 0)
+            y_bin_masked = tf.boolean_mask(y_bin, pos_examples_mask)
+            y_hat_bin_masked = tf.boolean_mask(y_hat_bin, pos_examples_mask)
+
+            TP = tf.count_nonzero(tf.multiply(y_bin_masked, y_hat_bin_masked))
+            TN = tf.count_nonzero(tf.multiply(y_bin_masked - 1, y_hat_bin_masked - 1))
+            P = tf.count_nonzero(y_bin_masked)
+            N = tf.count_nonzero(y_bin_masked - 1)
+            self.TPR = TP / P
+            self.TNR = TN / N
+            self.PPV = TP / tf.count_nonzero(y_hat_bin_masked)
 
         with tf.name_scope('tensorboard_summaries'):
-            if mode in ['all_metrics','roc']:
-                tf.summary.scalar('TPR', TPR)
-                tf.summary.scalar('TNR', TNR)
+            if mode in ['all_metrics']:
+                tf.summary.scalar('TPR', self.TPR)
+                tf.summary.scalar('TNR', self.TNR)
+                tf.summary.scalar('PPV', self.PPV)
+                # roc_summary = tf.Summary()
+                # roc_summary.value.add(tag='ROC', simple_value=self.TPR)
             if mode in ['all_metrics']:
                 tf.summary.scalar('loss', self.loss)
                 tf.summary.scalar('accuracy', accuracy)
                 for i in range(self.num_classes):
                     tf.summary.scalar('accuracy_class%d' % (i+1), accuracy_list[i])
         return tf.summary.merge_all()
-
-
-
 
     @abc.abstractmethod
     def calculate_cost(self):

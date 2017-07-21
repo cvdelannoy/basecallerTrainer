@@ -25,6 +25,10 @@ class readsim_model:
         return self.hdf['Analyses/Basecall_1D_000/BaseCalled_template/Events']['mean']
 
     @cached_property
+    def stdv(self):
+        return self.hdf['Analyses/Basecall_1D_000/BaseCalled_template/Events']['stdv']
+
+    @cached_property
     def model_states(self):
         return self.hdf['Analyses/Basecall_1D_000/BaseCalled_template/Events']['model_state']
 
@@ -39,10 +43,8 @@ class readsim_model:
     def raw_avg(self):
         """
         Calculate average raw signal for every 5-mer
-        :return: 
         """
         self.all_kmers_present = True
-        nb_events = self.raw.size
         _raw_avg = {}
         for cur_kmer in self.kmers:
             cur_idx = self.model_states == cur_kmer.encode('UTF-8')
@@ -52,6 +54,22 @@ class readsim_model:
                 cur_avg = float('nan')
             _raw_avg[cur_kmer] = cur_avg
         return _raw_avg
+
+    @cached_property
+    def raw_stdv(self):
+        """
+        Calculate average raw sd for every 5-mer
+        """
+        self.all_kmers_present = True
+        _raw_stdv = {}
+        for cur_kmer in self.kmers:
+            cur_idx = self.model_states == cur_kmer.encode('UTF-8')
+            if np.any(cur_idx):
+                cur_stdv = np.power(np.mean(np.power(self.stdv[cur_idx], 2)), 0.5)
+            else:
+                cur_stdv = float('nan')
+            _raw_stdv[cur_kmer] = cur_stdv
+        return _raw_stdv
 
 
 # realreads_path = '/mnt/nexenta/lanno001/nobackup/readFiles/ecoliLoman/ecoliLoman/'
