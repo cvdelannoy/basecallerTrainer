@@ -1,4 +1,5 @@
 import argparse
+import os
 
 # = ( , {
 #     'type': ,
@@ -6,9 +7,11 @@ import argparse
 #     'help':
 # })
 
+__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
 rnn_training_data = ('--training-data', {
     'type': str,
-    'required:': True,
+    'required': True,
     'nargs': '+',
     'help': 'npz-training reads on which the rnn should be trained. '
             'May be {a folder with/an array of/a single} training file.'
@@ -24,6 +27,7 @@ rnn_test_data = ('--test-data', {
 rnn_original_data = ('--original-data' , {
     'type': str,
     'required': False,
+    'default': None,
     'help': 'Original fast5-files on which test data is based. If supplied,'
             'rnn performance measures and read quality measures are collected'
             'and stored.'
@@ -48,6 +52,7 @@ additional_graphs_path = ('--additional-graphs-path' , {
 rnn_parameter_file = ('--rnn-parameter-file', {
     'type': str,
     'required': False,
+    'default': os.path.join(__location__,'RnnParameterFile_defaults.yaml'),
     'help': 'a yaml-file containing parameters. If none supplied, default values are used.'})
 
 def get_brnn_parser():

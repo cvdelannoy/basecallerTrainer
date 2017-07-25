@@ -31,9 +31,14 @@ class OrdinalBidirectionalRnn(BidirectionalRnn):
         y_hat_out = tf.reduce_sum(y_hat_out, axis=-1)
 
         # Account for supplied knowledge of kmers (target_kmer is all True if none is available)
-        y_hat_is_target = tf.equal(y_hat_out, self.num_classes)
-        y_hat_mask = tf.cast(tf.logical_and(y_hat_is_target, tf.logical_not(self.is_target_kmer)), dtype=tf.int32)
-        y_hat_out = y_hat_out - tf.multiply(tf.subtract(y_hat_out, 1), y_hat_mask)
+        # TODO: messing with this to check correctness of masking, restore afterwards!!!
+        # self.y_hat_is_target = tf.equal(y_hat_out, self.num_classes)
+        # self.y_hat_mask = tf.cast(tf.logical_and(self.y_hat_is_target, tf.logical_not(self.is_target_kmer)), dtype=tf.int32)
+        # y_hat_out = y_hat_out - tf.multiply(tf.subtract(y_hat_out, tf.ones_like(y_hat_out)), self.y_hat_mask)
+
+        # y_hat_is_target = tf.equal(y_hat_out, tf.constant([self.num_classes], dtype=tf.int32))
+        # y_hat_mask = tf.cast(tf.logical_and(y_hat_is_target, tf.logical_not(self.is_target_kmer)), dtype=tf.int32)
+        # y_hat_out = y_hat_out - tf.multiply(tf.subtract(y_hat_out, 1), y_hat_mask)
         return y_hat_out
 
     def calculate_cost(self):

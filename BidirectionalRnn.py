@@ -215,17 +215,26 @@ class BidirectionalRnn(object):
             # TPR and TNR for HPs
                 # if i == (self.num_classes - 1):
 
-            pos_examples_mask = tf.not_equal(tf.reduce_sum(y_bin, axis=1), 0)
-            y_bin_masked = tf.boolean_mask(y_bin, pos_examples_mask)
-            y_hat_bin_masked = tf.boolean_mask(y_hat_bin, pos_examples_mask)
+            # pos_examples_mask = tf.not_equal(tf.reduce_sum(y_bin, axis=1), 0)
+            # y_bin_masked = tf.boolean_mask(y_bin, pos_examples_mask)
+            # y_hat_bin_masked = tf.boolean_mask(y_hat_bin, pos_examples_mask)
 
-            TP = tf.count_nonzero(tf.multiply(y_bin_masked, y_hat_bin_masked))
-            TN = tf.count_nonzero(tf.multiply(y_bin_masked - 1, y_hat_bin_masked - 1))
-            P = tf.count_nonzero(y_bin_masked)
-            N = tf.count_nonzero(y_bin_masked - 1)
+            TP = tf.count_nonzero(tf.multiply(y_bin, y_hat_bin))
+            TN = tf.count_nonzero(tf.multiply(y_bin - 1, y_hat_bin - 1))
+            P = tf.count_nonzero(y_bin)
+            N = tf.count_nonzero(y_bin - 1)
             self.TPR = TP / P
             self.TNR = TN / N
-            self.PPV = TP / tf.count_nonzero(y_hat_bin_masked)
+            self.PPV = TP / tf.count_nonzero(y_hat_bin)
+
+
+            # TP = tf.count_nonzero(tf.multiply(y_bin_masked, y_hat_bin_masked))
+            # TN = tf.count_nonzero(tf.multiply(y_bin_masked - 1, y_hat_bin_masked - 1))
+            # P = tf.count_nonzero(y_bin_masked)
+            # N = tf.count_nonzero(y_bin_masked - 1)
+            # self.TPR = TP / P
+            # self.TNR = TN / N
+            # self.PPV = TP / tf.count_nonzero(y_hat_bin_masked)
 
         with tf.name_scope('tensorboard_summaries'):
             if mode in ['all_metrics']:

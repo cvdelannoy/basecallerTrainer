@@ -3,15 +3,15 @@ import numpy as np
 import os
 import shutil
 import time
+import warnings
 import itertools
 import re
 import h5py
+from math import nan
 
 from bokeh.models import ColumnDataSource, LinearColorMapper, LabelSet, Range1d
 from bokeh.plotting import figure
 # from bokeh.io import show
-
-import trainingRead2
 
 from math import pi
 
@@ -19,6 +19,42 @@ from math import pi
 categorical_colors = ['#8dd3c7', '#ffffb3', '#bebada', '#fb8072']
 continuous_colors = ['#ffffff', '#fff7ec', '#fee8c8', '#fdd49e', '#fdbb84',
                      '#fc8d59', '#ef6548', '#d7301f', '#990000']
+
+
+def parse_input_path(location):
+    """
+    Take path, list of files or single file. Add '/' if path. Return list of files with path name concatenated. 
+    """
+    if not isinstance(location, list):
+        location = [location]
+
+    all_files = []
+    for loc in location:
+        if os.path.isdir(loc):
+            if loc[-1] != '/':
+                loc += '/'
+            file_names = os.listdir(loc)
+            files = [loc + f for f in file_names]
+            all_files.extend(files)
+        elif os.path.exists(loc):
+            all_files.extend(loc)
+        else:
+            warnings.warn('Given location %s does not exist, skipping' % loc, RuntimeWarning)
+
+    if not len(all_files):
+        ValueError('Input file location(s) did not exist or did not contain any files.')
+    return all_files
+
+
+def parse_output_path(location):
+    """
+    Take given path name. Add '/' if path. Check if exists, if not, make dir and subdirs. 
+    """
+    if location[-1] != '/':
+        location += '/'
+    if not os.path.isdir(location):
+        os.makedirs(location)
+    return location
 
 def set_logfolder(brnn_object, parent_dir, epoch_index):
     """
@@ -39,7 +75,6 @@ def set_logfolder(brnn_object, parent_dir, epoch_index):
         shutil.rmtree(cur_tb_path)
     os.makedirs(cur_tb_path)
     return tf.summary.FileWriter(cur_tb_path, brnn_object.session.graph)
-
 
 def plot_timeseries(raw, base_labels, y_hat, brnn_object, categorical=False):
     ts_plot = figure(title='Classified time series')
@@ -109,11 +144,16 @@ def plot_roc_curve(roc_list):
     return roc_plot
 
 
-def retrieve_read_properties(dir_name, read_name):
-    read_name_grep = re.search('^.+_strand', read_name).group()
+def retrieve_read_properties(raw_read_dir, read_name):
+    read_name_grep = re.search('(?<=/)[^/]+_strand', read_name).group()
     # Reconstruct full read name + path
-    fast5_name = dir_name + read_name_grep + '.fast5'
-    hdf = h5py.File(fast5_name, 'r')
+    fast5_name = raw_read_dir + read_name_grep + '.fast5'
+    try:
+        hdf = h5py.File(fast5_name, 'r')
+    except OSError:
+        warnings.warn('Read %s not found in raw data, skipping reat property retrieval.' % fast5_name, RuntimeWarning)
+        return [nan for _ in range(5)]
+
 
     # Get metrics
     qscore = hdf['Analyses/Basecall_1D_000/Summary/basecall_1d_template'].attrs['mean_qscore']
@@ -140,24 +180,24 @@ def normalize_raw_signal(raw, norm_method):
     return (raw - shift) / scale
 
 
-def simulate_on_the_fly(tr_name):
-    readnb = int(re.search("(?<=read)\d+", tr).group())
-    hdf = h5py.File(tr_name, 'r')
-    try:
-        tr_cur = trainingRead.TrainingRead(hdf, readnb, 'median', use_nanoraw=False)
-    except KeyError:
-        hdf.close()
-        continue
-    encoded = tr_cur.classify_events('hp_5class')
-    if tr_cur.events is None:
-        continue
-    unknown_index = tr_cur.events != 'NNNNN'  # Remove data for raw data without a k-mer
-    raw = tr_cur.raw[unknown_index]
-    onehot = encoded[unknown_index]
-    frac_min_class = np.sum(onehot == 5) / encoded.size
-    if frac_min_class < min_content_percentage or raw.size < read_length:
-        continue
-    print('read simulated')
+# def simulate_on_the_fly(tr_name):
+#     if params['simulate_on_the_fly']:
+#         readnb = int(re.search("(?<=read)\d+(?!(.*/))", tr).group())
+#         hdf = h5py.File(tr, 'r')
+#         try:
+#             tr_cur = trainingRead.TrainingRead(hdf, readnb, 'median', use_nanoraw=False)
+#         except KeyError:
+#             hdf.close()
+#             continue
+#         encoded = tr_cur.classify_events('hp_5class')
+#         if tr_cur.events is None:
+#             continue
+#         unknown_index = tr_cur.events != 'NNNNN'  # Remove data for raw data without a k-mer
+#         raw = tr_cur.raw[unknown_index]
+#         onehot = encoded[unknown_index]
+#         frac_min_class = np.sum(onehot == 5) / encoded.size
+#         if frac_min_class < min_content_percentage or raw.size < params['read_length']:
+#             continue
 
 
 def apply_post_processing(y_hat):
