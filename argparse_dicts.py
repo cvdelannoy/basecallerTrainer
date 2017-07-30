@@ -36,16 +36,41 @@ rnn_original_data = ('--original-data' , {
 tensorboard_path = ('--tensorboard-path', {
     'type': str,
     'required': False,
-    'default':'~/tensorboard_logs/',
-    'help': 'Define different location to store tensorboard files. Default is home/tensorboard_logs/'
+    'default': os.path.expanduser('~/tensorboard_logs/'),
+    'help': 'Define different location to store tensorboard files. Default is home/tensorboard_logs/. '
             'Folders and sub-folders are generated if not existiing.'
+})
+
+model_weights = ('--model-weights' , {
+    'type': str,
+    'required': False,
+    'default': None,
+    'help': 'Provide a (tensorflow checkpoint) file containing graph meta data and weights '
+            'for the selected model. '
+})
+
+potential_targets = ('--potential-targets', {
+    'type': str,
+    'required': False,
+    'nargs': '+',
+    'default': None,
+    'help': 'If applicable, supply a set of "potential target" k-mers. Positive hits outside these targets are '
+            'automatically turned into negatives (lowest class if using multi-class labeling).'
+})
+
+save_model = ('--save-model' , {
+    'type': str,
+    'required': False,
+    'default': None,
+    'help': 'Store the model weights at the provided location, with the same name as the parameter (yaml) file '
+            '(with ckpt-extension).'
 })
 
 additional_graphs_path = ('--additional-graphs-path' , {
     'type': str,
     'required': False,
-    'default': '~/rnn_additional_graphs/',
-    'help': 'Define different location to store additional graphs, if made. Default is home/rnn_aditional_graphs/'
+    'default': os.path.expanduser('~/rnn_additional_graphs/'),
+    'help': 'Define different location to store additional graphs, if made. Default is home/rnn_aditional_graphs/. '
             'Folders and sub-folders are generated if not existiing.'
 })
 
@@ -64,6 +89,9 @@ def get_brnn_parser():
     parser.add_argument(tensorboard_path[0], **tensorboard_path[1])
     parser.add_argument(additional_graphs_path[0], **additional_graphs_path[1])
     parser.add_argument(rnn_parameter_file[0], **rnn_parameter_file[1])
+    parser.add_argument(potential_targets[0], **potential_targets[1])
+    parser.add_argument(model_weights[0], **model_weights[1])
+    parser.add_argument(save_model[0], **save_model[1])
 
     return parser
 

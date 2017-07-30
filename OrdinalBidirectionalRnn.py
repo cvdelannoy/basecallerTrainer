@@ -66,12 +66,6 @@ class OrdinalBidirectionalRnn(BidirectionalRnn):
                                                                                                        y_hat_logit,
                                                                                                        pos_weights)]
                 losses += cur_loss
-                # pos_examples = tf.reduce_sum(self.y[:,:,cl])
-                # pos_weight = tf.cast((self.batch_size * self.nb_steps - pos_examples + 1) / (pos_examples + 1), dtype=tf.float32)
-                # cur_loss = tf.nn.weighted_cross_entropy_with_logits(targets=tf.cast(self.y[:,:,cl], dtype=tf.float32),
-                #                                                     logits=self.y_hat_logit[:,:,cl],
-                #                                                     pos_weight=pos_weight)
-                # losses += [cur_loss]
         else:
             losses = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.cast(self.y, dtype=tf.float32),
                                                                  logits=self.y_hat_logit)

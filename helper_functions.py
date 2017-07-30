@@ -56,21 +56,25 @@ def parse_output_path(location):
         os.makedirs(location)
     return location
 
-def set_logfolder(brnn_object, parent_dir, epoch_index):
+def set_logfolder(brnn_object, param_base_name, parent_dir, epoch_index):
     """
     Create a folder to store tensorflow metrics for tensorboard and set it up for a specific session.
     Returns a filewriter object, which can be used to write info to tensorboard.
     """
     timedate = time.strftime('%y%m%d_%H%M%S')
-    cur_tb_path = parent_dir + '%s_%s_batchSize%s_learningRate%s_layerSize%s_%s_numLayers%s_ep%s/' % (
-                                                               timedate,
-                                                               brnn_object.cell_type,
-                                                               brnn_object.batch_size,
-                                                               brnn_object.learning_rate,
-                                                               brnn_object.layer_size,
-                                                               brnn_object.name_optimizer,
-                                                               brnn_object.num_layers,
-                                                               epoch_index)
+    # cur_tb_path = parent_dir + '%s_%s_batchSize%s_learningRate%s_layerSize%s_%s_numLayers%s_ep%s/' % (
+    #                                                            timedate,
+    #                                                            brnn_object.cell_type,
+    #                                                            brnn_object.batch_size,
+    #                                                            brnn_object.learning_rate,
+    #                                                            brnn_object.layer_size,
+    #                                                            brnn_object.name_optimizer,
+    #                                                            brnn_object.num_layers,
+    #                                                            epoch_index)
+    cur_tb_path = parent_dir + '%s_%s_ep%s/' % (
+        timedate,
+        param_base_name,
+        epoch_index)
     if os.path.isdir(cur_tb_path):
         shutil.rmtree(cur_tb_path)
     os.makedirs(cur_tb_path)
@@ -115,7 +119,7 @@ def plot_timeseries(raw, base_labels, y_hat, brnn_object, categorical=False):
     ts_plot.scatter(x='event', y='raw', source=source)
     ts_plot.plot_width = 1000
     ts_plot.plot_height = 500
-    ts_plot.x_range = Range1d(0, 500)
+    ts_plot.x_range = Range1d(0, 100)
     return ts_plot
 
 

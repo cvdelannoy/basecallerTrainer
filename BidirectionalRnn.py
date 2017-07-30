@@ -37,14 +37,14 @@ class BidirectionalRnn(object):
         self.dropout_keep_prob = dropout_keep_prob
         self.adaptive_positive_weighting = adaptive_positive_weighting
 
-        # (Partially) derived properties
+        # Derived properties
         read_length_extended = (read_length - input_size + 1) * input_size
         self.nb_steps = read_length_extended // input_size // batch_size  # NOTE: floored division
         self.label_shift = (input_size - 1) // 2
         self.w = tf.Variable(tf.random_normal([2 * layer_size, num_classes]))
-        self.b = tf.Variable(np.zeros([num_classes], dtype=np.float32))
+        # self.b = tf.Variable(np.zeros([num_classes], dtype=np.float32))
         self.x = tf.placeholder(tf.float32, [self.batch_size, self.nb_steps, self.input_size])
-        self.is_target_kmer = tf.placeholder(tf.bool, [self.batch_size, self.nb_steps])
+        # self.is_target_kmer = tf.placeholder(tf.bool, [self.batch_size, self.nb_steps])
         self.y = self.set_y()
         # self.y = tf.placeholder(tf.int32, [self.batch_size, self.nb_steps, self.num_classes])
         self.y_hat_logit = self.construct_brnn()  # NOTE: NO SIGMOID YET --> range (-inf,inf)
@@ -52,27 +52,14 @@ class BidirectionalRnn(object):
         self.TPR = None
         self.TNR = None
         self.PPV = None
-        # self.P = None  # for debugging purposes, remove below this afterward
-        # self.N = None
-        # self.TP = None
-        # self.TN = None
 
         self.loss = self.calculate_cost()
-        self.tb_summary = self.construct_evaluation('all_metrics')
-        self.tb_roc = self.construct_evaluation('roc')
+        self.tb_summary = self.construct_evaluation()
 
         self.session = None
         self.name_optimizer = name_optimizer
         self.optimizer = name_optimizer
-        # self._optimizer = None
 
-    # @cached_property
-    # def y(self):
-    #     return tf.unstack(self.y_placeholder, self.nb_steps, 1)
-    #
-    # @cached_property
-    # def x(self):
-    #     return tf.unstack(self.x_placeholder, self.nb_steps, 1)
 
     @property
     def base_cell(self):
@@ -95,22 +82,26 @@ class BidirectionalRnn(object):
         fwd_cell_list = []
         for fl in range(self.num_layers):
             with tf.variable_scope('forward%d' % fl, reuse=True):
-                fwd_cell = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(self.base_cell,
-                                                                       output_keep_prob=self.dropout_keep_prob)
+                fwd_cell = tf.contrib.rnn.DropoutWrapper(self.base_cell,
+                                                         output_keep_prob=self.dropout_keep_prob)
             fwd_cell_list.append(fwd_cell)
         fwd_multicell = tf.contrib.rnn.MultiRNNCell(fwd_cell_list)
 
         bwd_cell_list = []
         for bl in range(self.num_layers):
             with tf.variable_scope('backward%d' % bl, reuse=True):
-                bwd_cell = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(self.base_cell,
-                                                                       output_keep_prob=self.dropout_keep_prob)
+                bwd_cell = tf.contrib.rnn.DropoutWrapper(self.base_cell,
+                                                         output_keep_prob=self.dropout_keep_prob)
             bwd_cell_list.append(bwd_cell)
         bwd_multicell = tf.contrib.rnn.MultiRNNCell(bwd_cell_list)
         brnn_out, _, _ = tf.contrib.rnn.static_bidirectional_rnn(cell_fw=fwd_multicell, cell_bw=bwd_multicell,
                                                                  inputs=tf.unstack(self.x, self.nb_steps, 1),
                                                                  dtype=tf.float32)
-        y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
+
+        # y_hat = [tf.matmul(bo, self.w) + self.b for bo in brnn_out]
+        # Attention mechanism: softmax over w
+        w_softmax = tf.nn.softmax(self.w, dim=1)
+        y_hat = [tf.matmul(bo, w_softmax) for bo in brnn_out]
         return tf.squeeze(tf.stack(y_hat, axis=1))  # squeeze to remove dimensions of 1
 
     @optimizer.setter
@@ -123,6 +114,7 @@ class BidirectionalRnn(object):
         elif name_optimizer == 'adagrad':
             self._optimizer = tf.train.AdagradOptimizer(self.learning_rate).minimize(self.loss)
         elif name_optimizer == 'adadelta':
+            # self._optimizer = tf.train.AdadeltaOptimizer(self.learning_rate, epsilon=1e-06).minimize(self.loss)
             self._optimizer = tf.train.AdadeltaOptimizer(self.learning_rate).minimize(self.loss)
         else:
             raise ValueError('Given optimizer name %s not recognized' % name_optimizer)
@@ -149,9 +141,10 @@ class BidirectionalRnn(object):
             truncated_kmers = kmers[self.label_shift:]
             is_target_kmer = np.array([1 if km in target_kmers else 0 for km in truncated_kmers])
             is_target_kmer = is_target_kmer[:self.batch_size * self.nb_steps]
-            is_target_kmer = is_target_kmer.reshape(self.batch_size, self.nb_steps)
+            # is_target_kmer = is_target_kmer.reshape(self.batch_size, self.nb_steps)
         else:
-            is_target_kmer = np.ones([self.batch_size, self.nb_steps])
+            # is_target_kmer = np.ones([self.batch_size, self.nb_steps])
+            is_target_kmer = np.ones(self.batch_size * self.nb_steps)
         return is_target_kmer
 
     def initialize_model(self, params):
@@ -161,17 +154,17 @@ class BidirectionalRnn(object):
             self.session.run(tf.global_variables_initializer())
         else:
             print("Loading model parameters from %s" % params)
-            tf.train.Saver(tf.global_variables()).restore(self.session, params)
+            checkpoint_name = params + 'obrnn.ckpt'
+            tf.train.Saver(tf.global_variables()).restore(self.session, checkpoint_name)
 
-    def train_model(self, raw, labels, kmers=None, target_kmers=None):
+    def train_model(self, raw, labels):
         raw_reshape = self.reshape_raw(raw)
         labels_reshape = self.reshape_labels(labels)
-        is_target_kmer = self.mark_target_kmers(kmers, target_kmers)
-        self.session.run(self.optimizer, feed_dict={
+        loss, _ = self.session.run([self.loss, self.optimizer], feed_dict={
             self.x: raw_reshape,
-            self.y: labels_reshape,
-            self.is_target_kmer: is_target_kmer
+            self.y: labels_reshape
         })
+        return loss
 
     def evaluate_model(self, raw, labels, kmers=None, target_kmers=None):
         raw_reshape = self.reshape_raw(raw)
@@ -181,9 +174,25 @@ class BidirectionalRnn(object):
         tb_summary, loss, y_hat, TPR, TNR, PPV = self.session.run([self.tb_summary, self.loss, self.y_hat,
                                                                    self.TPR, self.TNR, self.PPV], feed_dict={
             self.x: raw_reshape,
-            self.y: labels_reshape,
-            self.is_target_kmer: is_target_kmer
+            self.y: labels_reshape
             })
+
+        # Calculate TPR/TNR/PPV outside tf; internal implementation does not work properly
+        y_hat = y_hat.reshape(-1)
+        y_hat_pp = [1 if yh == self.num_classes and itk == 0 else yh for yh, itk in zip(y_hat, is_target_kmer)]
+        onehot_pp = labels[self.label_shift:]
+        onehot_pp = onehot_pp[:y_hat.size]
+
+        P = np.sum(onehot_pp==self.num_classes)
+        N = np.sum(is_target_kmer) - P
+        TP = sum([1 if yhp == oh and yhp == self.num_classes else 0 for yhp, oh in zip(y_hat_pp, onehot_pp)])
+        # TPR = TP / sum([ohp == self.num_classes for ohp in onehot_pp])
+        TPR = TP / P
+        PPV = TP / sum([1 for yhp in y_hat_pp if yhp == self.num_classes])
+        TN = sum([1 if oh != self.num_classes and yhp != self.num_classes and itk == 1
+                  else 0 for yhp, oh, itk in zip(y_hat_pp, onehot_pp, is_target_kmer)])
+        TNR = TN / N
+
         return tb_summary, loss, y_hat, TPR, TNR, PPV
 
     def predict(self, raw):
@@ -199,7 +208,7 @@ class BidirectionalRnn(object):
         # Add padding, revert from batches to 1D
         return np.concatenate((padding, y_hat, padding))
 
-    def construct_evaluation(self, mode):
+    def construct_evaluation(self):
         with tf.name_scope('Performance_assessment'):
             # Overall accuracy
             accuracy = tf.reduce_mean(tf.cast(tf.equal(self.y_multiclass, self.y_hat), dtype=tf.float32))
@@ -237,13 +246,9 @@ class BidirectionalRnn(object):
             # self.PPV = TP / tf.count_nonzero(y_hat_bin_masked)
 
         with tf.name_scope('tensorboard_summaries'):
-            if mode in ['all_metrics']:
                 tf.summary.scalar('TPR', self.TPR)
                 tf.summary.scalar('TNR', self.TNR)
                 tf.summary.scalar('PPV', self.PPV)
-                # roc_summary = tf.Summary()
-                # roc_summary.value.add(tag='ROC', simple_value=self.TPR)
-            if mode in ['all_metrics']:
                 tf.summary.scalar('loss', self.loss)
                 tf.summary.scalar('accuracy', accuracy)
                 for i in range(self.num_classes):
